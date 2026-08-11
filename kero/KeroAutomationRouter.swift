@@ -949,9 +949,10 @@ enum KeroAutomationRouter {
         ])
     }
 
-    /// Records the provider conversation running in the caller's terminal, so
-    /// a relaunch can offer to resume it. Only the caller's own terminal can be
-    /// named: the hook that reports this runs inside it.
+    /// Records — or, at the end of a conversation, clears — the provider
+    /// conversation open in the caller's terminal, so a relaunch can put the
+    /// pane back into it. Only the caller's own terminal can be named: the hook
+    /// that reports this runs inside it.
     private static func recordAgentSession(
         _ request: KeroAutomationRequest,
         caller: PaneContext
@@ -960,11 +961,18 @@ enum KeroAutomationRouter {
             return failure(request, "terminal_required", "The caller is not a terminal pane.")
         }
         guard let kindName = request.params["kind"]?.stringValue,
-              KeroAgentKind(rawValue: kindName) != nil else {
+              let kind = KeroAgentKind(rawValue: kindName) else {
             return failure(
                 request, "invalid_agent_kind",
                 "Supported kinds: \(KeroAgentKind.allCases.map(\.rawValue).joined(separator: ", "))."
             )
+        }
+        if request.params["end"]?.boolValue == true {
+            session.clearAgentSession(kind: kind)
+            return success(request, .object([
+                "terminal_id": .string(session.id.uuidString),
+                "resumable": .bool(false),
+            ]))
         }
         guard let sessionID = request.params["session_id"]?.stringValue,
               KeroAgentResume.isSafeSessionID(sessionID) else {
@@ -973,10 +981,15 @@ enum KeroAutomationRouter {
                 "session_id must be printable ASCII of at most 512 bytes."
             )
         }
-        session.agentProviderSessionID = sessionID
+        session.recordAgentSession(
+            kind: kind,
+            sessionID: sessionID,
+            directory: request.params["cwd"]?.stringValue
+        )
         return success(request, .object([
             "terminal_id": .string(session.id.uuidString),
             "session_id": .string(sessionID),
+            "resumable": .bool(session.agentResumeCommand != nil),
         ]))
     }
 

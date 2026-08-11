@@ -28,6 +28,9 @@ enum KeroClaudeIntegration {
         case userPromptSubmit = "UserPromptSubmit"
         case stop = "Stop"
         case notification = "Notification"
+        /// The conversation is over — drop the record rather than let a
+        /// relaunch reopen something the user deliberately closed.
+        case sessionEnd = "SessionEnd"
 
         var phase: String {
             switch self {
@@ -35,6 +38,7 @@ enum KeroClaudeIntegration {
             case .userPromptSubmit: "working"
             case .stop: "idle"
             case .notification: "blocked"
+            case .sessionEnd: "ended"
             }
         }
 

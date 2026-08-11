@@ -3,17 +3,31 @@
 //  kero
 //
 
+import Darwin
 import Foundation
 
-/// Rebuilds the command that puts a coding agent back into the conversation a
-/// pane was holding when Kero quit.
+/// What a terminal needs to reopen the agent conversation it was holding.
 ///
-/// Restoring a terminal has always meant a fresh shell in the same directory.
-/// For a pane that was mid-conversation with an agent that owns days of
-/// context, that is the one thing the user does not want: the shell comes back
-/// and the conversation does not. The agent's own resume flag fixes that, but
-/// only if Kero knows which conversation — which is why this is written from a
-/// provider lifecycle hook rather than guessed from the screen.
+/// Written when the provider says a conversation started, refreshed on every
+/// later event, and cleared when the provider says it ended. Deliberately not
+/// derived from what the terminal looked like at quit: the foreground process
+/// at that instant may be a child the agent spawned, and a conversation worth
+/// days of context is not something to lose to a sampling accident.
+struct KeroAgentResumeRecord {
+    let kind: KeroAgentKind
+    /// The provider's own conversation id.
+    let sessionID: String
+    /// Where the conversation is working, as the provider reports it — an
+    /// agent that moved itself to another worktree must come back to that one.
+    let directory: String
+    /// The agent process as last observed. Only used to tell a conversation
+    /// that is still open from one the user has already left.
+    let processID: pid_t?
+    let updatedAt: Date
+}
+
+/// Rebuilds the command that puts a coding agent back into a recorded
+/// conversation.
 enum KeroAgentResume {
     /// Options worth carrying into the resumed session.
     ///
@@ -36,20 +50,16 @@ enum KeroAgentResume {
     ]
 
     /// `cd <directory> && claude <preserved flags> --resume <id>`.
-    ///
-    /// The `cd` is part of the command rather than the pane's restored working
-    /// directory alone, because an agent that moved itself to another worktree
-    /// must come back to the tree it was actually working in.
-    static func claudeCommand(
-        sessionID: String,
-        directory: String,
-        arguments: [String]
-    ) -> String? {
-        guard isSafeSessionID(sessionID), directory.hasPrefix("/") else { return nil }
-        var parts = ["cd", shellQuote(directory), "&&", "claude"]
+    static func command(for record: KeroAgentResumeRecord) -> String? {
+        guard record.kind == .claude,
+              isSafeSessionID(record.sessionID),
+              record.directory.hasPrefix("/")
+        else { return nil }
+        let arguments = record.processID.flatMap { processArguments(pid: $0) } ?? []
+        var parts = ["cd", shellQuote(record.directory), "&&", record.kind.executable]
         parts.append(contentsOf: preserved(from: arguments).map(shellQuote))
         parts.append("--resume")
-        parts.append(shellQuote(sessionID))
+        parts.append(shellQuote(record.sessionID))
         return parts.joined(separator: " ")
     }
 
@@ -62,6 +72,27 @@ enum KeroAgentResume {
         return value.unicodeScalars.allSatisfy {
             $0.value > 0x20 && $0.value != 0x7f && $0.value < 0x80
         }
+    }
+
+    static func isSafeDirectory(_ value: String) -> Bool {
+        guard value.hasPrefix("/"), value.utf8.count <= 4_096 else { return false }
+        return value.unicodeScalars.allSatisfy {
+            $0.value >= 0x20 && !(0x7f...0x9f).contains($0.value)
+        }
+    }
+
+    /// Whether the recorded conversation is still open.
+    ///
+    /// `SessionEnd` clears the record for every ordinary exit, so this only
+    /// covers the cases where no event could be delivered — the agent was
+    /// killed, or the machine went down. Liveness, not foreground: an agent
+    /// running a tool is still mid-conversation.
+    static func isLive(_ record: KeroAgentResumeRecord) -> Bool {
+        guard let processID = record.processID, processID > 1 else { return false }
+        guard Darwin.kill(processID, 0) == 0 || errno == EPERM else { return false }
+        // A pid can be reused; requiring the reused one to also be this agent
+        // keeps a recycled pid from resurrecting a finished conversation.
+        return KeroAgentKind.recognize(processID: processID) == record.kind
     }
 
     private static func preserved(from arguments: [String]) -> [String] {
@@ -91,24 +122,52 @@ enum KeroAgentResume {
 }
 
 extension TerminalSession {
+    /// Records or refreshes the conversation running in this terminal.
+    ///
+    /// Every provider event carries the conversation id, so this runs
+    /// repeatedly across a conversation's life. That is what keeps the working
+    /// directory current when an agent moves itself, and gives Kero repeated
+    /// chances to observe the agent's own pid rather than depending on one
+    /// lucky moment.
+    func recordAgentSession(
+        kind: KeroAgentKind,
+        sessionID: String,
+        directory: String?
+    ) {
+        let observed = surface.foregroundPid.flatMap { pid -> pid_t? in
+            KeroAgentKind.recognize(processID: pid) == kind ? pid : nil
+        }
+        let resolved = directory.flatMap {
+            KeroAgentResume.isSafeDirectory($0) ? $0 : nil
+        }
+        agentResumeRecord = KeroAgentResumeRecord(
+            kind: kind,
+            sessionID: sessionID,
+            // Keep the last known good values when this event carries neither:
+            // a hook that omits `cwd` must not downgrade the record.
+            directory: resolved
+                ?? agentResumeRecord?.directory
+                ?? currentDirectoryPath,
+            processID: observed ?? agentResumeRecord?.processID,
+            updatedAt: Date()
+        )
+    }
+
+    /// The provider says the conversation ended. There is nothing to resume,
+    /// and leaving the record would reopen a conversation the user closed.
+    func clearAgentSession(kind: KeroAgentKind) {
+        guard agentResumeRecord?.kind == kind else { return }
+        agentResumeRecord = nil
+    }
+
     /// The command that would restore this pane's agent conversation, or nil
     /// when there is nothing to restore.
-    ///
-    /// Deliberately narrow: the agent has to be the terminal's *live foreground
-    /// process* right now. A conversation the user already exited is finished,
-    /// and reviving it on the next launch would be Kero second-guessing them.
     var agentResumeCommand: String? {
         guard !hasExited,
-              let sessionID = agentProviderSessionID,
-              let foreground = surface.foregroundPid,
-              foreground != shellPid,
-              KeroAgentKind.recognize(processID: foreground) == .claude
+              let record = agentResumeRecord,
+              KeroAgentResume.isLive(record)
         else { return nil }
-        return KeroAgentResume.claudeCommand(
-            sessionID: sessionID,
-            directory: foregroundDirectoryPath ?? currentDirectoryPath,
-            arguments: processArguments(pid: foreground) ?? []
-        )
+        return KeroAgentResume.command(for: record)
     }
 
     /// Replays a restored pane's resume command once its shell is ready.

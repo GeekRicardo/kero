@@ -848,8 +848,10 @@ enum KeroAutomationCommandLine {
     }
 
     /// Claude Code's hooks post a JSON event on stdin. Every event carries the
-    /// conversation id, so one handler both drives the lifecycle badge and
-    /// records what a later relaunch needs to resume this conversation.
+    /// conversation id and working directory, so one handler both drives the
+    /// lifecycle badge and keeps the record a later relaunch needs to resume
+    /// this conversation — written as the conversation runs, and cleared when
+    /// Claude Code says it ended.
     ///
     /// Failures stay silent: a hook that reports an error interrupts the user's
     /// agent, and screen detection remains the fallback either way.
@@ -858,17 +860,30 @@ enum KeroAutomationCommandLine {
         let event = readIntegrationEvent()
         guard let connection = try? AppConnection() else { return }
 
-        if let sessionID = event?["session_id"]?.stringValue {
-            // Kero takes the working directory from the live process at quit,
-            // not from this event: an agent that moved itself to another
-            // worktree must resume in the tree it ended up in.
+        if phase == "ended" {
             _ = try? connection.automationRequest(
                 method: "agent.session",
                 params: [
                     "kind": .string(KeroAgentKind.claude.rawValue),
-                    "session_id": .string(sessionID),
+                    "end": .bool(true),
                 ],
                 timeout: 1
+            )
+            return
+        }
+
+        if let sessionID = event?["session_id"]?.stringValue {
+            var params: [String: KeroJSONValue] = [
+                "kind": .string(KeroAgentKind.claude.rawValue),
+                "session_id": .string(sessionID),
+            ]
+            // Refreshed on every event on purpose: an agent that moves itself
+            // to another worktree has to resume in the tree it ended up in.
+            if let cwd = event?["cwd"]?.stringValue {
+                params["cwd"] = .string(cwd)
+            }
+            _ = try? connection.automationRequest(
+                method: "agent.session", params: params, timeout: 1
             )
         }
 

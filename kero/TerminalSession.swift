@@ -61,10 +61,11 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// Short project-local name an automation client can target instead of a
     /// UUID. Independent of the agent alias: a plain shell has no agent.
     var automationAlias: String?
-    /// The agent conversation running in this terminal, as reported by that
-    /// provider's own lifecycle hook. Kero never infers it from the screen —
-    /// a wrong id would resume someone else's conversation.
-    var agentProviderSessionID: String?
+    /// The agent conversation open in this terminal, as reported by that
+    /// provider's own lifecycle hooks: written when the conversation starts,
+    /// cleared when it ends. Kero never infers it from the screen — a wrong id
+    /// would resume someone else's conversation.
+    var agentResumeRecord: KeroAgentResumeRecord?
 
     init(
         initialDirectory: String? = nil,
