@@ -211,6 +211,16 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// Put a mouse selection on the clipboard as soon as it is made, the way
+    /// terminals have always behaved. On by default; the terminal is the one
+    /// place where this is the expected behavior rather than a surprise.
+    @Published var copyOnSelect: Bool {
+        didSet {
+            TerminalManager.refreshAllAppearances()
+            save()
+        }
+    }
+
     /// Play a sound with Kero's notifications — an agent finishing or needing
     /// attention, a terminal bell, a program's own notification request. On by
     /// default: the point of a background notification is to be noticed, and
@@ -274,6 +284,7 @@ final class AppSettings: nonisolated ObservableObject {
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
         aiEnabled = toml["ai.enabled"]?.bool ?? false
         notificationSound = toml["notifications.sound"]?.bool ?? true
+        copyOnSelect = toml["terminal.copy-on-select"]?.bool ?? true
         shortcuts = KeyboardShortcutMap.load(from: toml)
         terminalBackend = TerminalBackend(persisted: toml["terminal.backend"]?.string)
         applyAppearance()
@@ -324,6 +335,7 @@ final class AppSettings: nonisolated ObservableObject {
         wrapLines = false
         restoreTerminalHistory = false
         notificationSound = true
+        copyOnSelect = true
         shortcuts.resetAll()
         if aiEnabled {
             do {
@@ -417,6 +429,9 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if !notificationSound {
             lines.append("notifications.sound = false")
+        }
+        if !copyOnSelect {
+            lines.append("terminal.copy-on-select = false")
         }
         if terminalBackend != .fallback {
             lines.append("terminal.backend = \(TOML.quote(terminalBackend.rawValue))")

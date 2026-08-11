@@ -140,6 +140,13 @@ extension KeroTerminalView {
             // wrapper's base config can never drift them. Cmd-C/Cmd-V are
             // host-initiated and stay prompt-free (unless an unsafe paste
             // trips protection).
+            // `clipboard` rather than `true`: Ghostty's `true` targets the X11
+            // selection clipboard, which macOS does not have, so it would copy
+            // nowhere the user can paste from.
+            builder.withCustom(
+                "copy-on-select",
+                settings.copyOnSelect ? "clipboard" : "false"
+            )
             builder.withCustom("clipboard-read", "ask")
             builder.withCustom("clipboard-write", "allow")
             builder.withCustom("clipboard-paste-protection", "true")

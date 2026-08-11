@@ -32,7 +32,8 @@ struct SidebarView: View {
                 }
                 ChromeIconButton(
                     systemImage: "sidebar.left",
-                    tooltip: "Toggle Left Sidebar (⌘B)"
+                    tooltip: "Toggle Left Sidebar",
+                    shortcut: .toggleLeftSidebar
                 ) {
                     manager.toggleLeftSidebar()
                 }
@@ -71,7 +72,8 @@ struct SidebarView: View {
             HStack(spacing: 2) {
                 SidebarFooterButton(
                     systemImage: "plus",
-                    tooltip: "New Project (⌘N)"
+                    tooltip: "New Project",
+                    shortcut: .newProject
                 ) { manager.newProject() }
                 Spacer()
                 SidebarFooterButton(
@@ -85,6 +87,8 @@ struct SidebarView: View {
                 }
                 SidebarFooterButton(
                     systemImage: "gearshape",
+                    // Not in Kero's rebindable set: macOS owns Command-comma
+                    // for every app's settings, so the literal stays true.
                     tooltip: "Settings (⌘,)",
                     tooltipAlignment: .trailing
                 ) { openSettings() }
@@ -152,12 +156,18 @@ struct SidebarView: View {
 struct ChromeIconButton: View {
     let systemImage: String
     let tooltip: LocalizedStringKey
+    /// Command whose current key equivalent is appended to the tooltip. Kept
+    /// out of the localized key on purpose: the shortcut is configurable, so
+    /// baking it into the translatable string would both go stale and give
+    /// translators a value they cannot see.
+    var shortcut: KeyboardShortcutAction?
     var font: Font = .system(size: 12, weight: .medium)
     var iconSize: CGFloat = 16
     var tooltipEdge: TooltipEdge = .below
     var tooltipAlignment: HorizontalAlignment = .trailing
     let action: () -> Void
 
+    @ObservedObject private var settings = AppSettings.shared
     @State private var isHovering = false
 
     var body: some View {
@@ -175,7 +185,14 @@ struct ChromeIconButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .tooltip(tooltip, edge: tooltipEdge, alignment: tooltipAlignment)
+        .tooltip(
+            tooltip,
+            shortcut: shortcut.flatMap {
+                settings.shortcuts.binding(for: $0)?.displayString
+            },
+            edge: tooltipEdge,
+            alignment: tooltipAlignment
+        )
     }
 }
 
@@ -204,6 +221,7 @@ private struct FPSBadge: View {
 private struct SidebarFooterButton: View {
     let systemImage: String
     let tooltip: LocalizedStringKey
+    var shortcut: KeyboardShortcutAction?
     /// Buttons near the sidebar's right edge anchor `.trailing` so the label
     /// grows inward instead of off-panel.
     var tooltipAlignment: HorizontalAlignment = .leading
@@ -213,6 +231,7 @@ private struct SidebarFooterButton: View {
         ChromeIconButton(
             systemImage: systemImage,
             tooltip: tooltip,
+            shortcut: shortcut,
             tooltipEdge: .above,
             tooltipAlignment: tooltipAlignment,
             action: action
@@ -370,9 +389,16 @@ private struct SidebarProjectRow: View {
                     }
                     .buttonStyle(.plain)
                 } else if index < 9, !isRenaming {
-                    Text(verbatim: "⌘\(index + 1)")
-                        .font(.system(size: supportingFontSize))
-                        .foregroundStyle(.tertiary)
+                    // Reveals itself only while the bound modifiers are held,
+                    // and reads the live binding rather than a literal — the
+                    // shortcut is configurable, so a painted-in "⌘1" is wrong
+                    // the moment someone rebinds it.
+                    ShortcutHintRepresentable(
+                        action: .selectWorkspaceNumber,
+                        index: index,
+                        fontSize: supportingFontSize
+                    )
+                    .frame(height: 16)
                 }
             }
             .frame(width: 24, height: 16, alignment: .trailing)

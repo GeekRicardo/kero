@@ -20,17 +20,26 @@ extension View {
     /// from whatever panel edge the control sits against — the label is free
     /// to overhang its container, so a trailing button anchored `.leading`
     /// would spill outside the window.
+    /// `shortcut` is appended outside the localized string, so a rebound key
+    /// equivalent shows through without a translator ever having to carry a
+    /// value that is not theirs to translate.
     func tooltip(
         _ text: LocalizedStringKey,
+        shortcut: String? = nil,
         edge: TooltipEdge = .above,
         alignment: HorizontalAlignment = .leading
     ) -> some View {
-        modifier(TooltipModifier(text: text, edge: edge, alignment: alignment))
+        modifier(
+            TooltipModifier(
+                text: text, shortcut: shortcut, edge: edge, alignment: alignment
+            )
+        )
     }
 }
 
 private struct TooltipModifier: ViewModifier {
     let text: LocalizedStringKey
+    let shortcut: String?
     let edge: TooltipEdge
     let alignment: HorizontalAlignment
 
@@ -74,7 +83,13 @@ private struct TooltipModifier: ViewModifier {
     }
 
     private var label: some View {
-        Text(text)
+        HStack(spacing: 5) {
+            Text(text)
+            if let shortcut {
+                Text(verbatim: shortcut)
+                    .foregroundStyle(.secondary)
+            }
+        }
             .font(.system(size: 11))
             .foregroundStyle(.primary)
             .fixedSize()

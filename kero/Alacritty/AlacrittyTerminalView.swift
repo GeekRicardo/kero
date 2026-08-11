@@ -1419,6 +1419,12 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             reportingMouseButton = false
             sendMouse(code: 0, event: event, released: true)
         }
+        // Copy-on-select belongs at the end of the drag, not at every update:
+        // copying on each mouseDragged would rewrite the pasteboard dozens of
+        // times per selection.
+        if selectionAnchor != nil, AppSettings.shared.copyOnSelect, hasSelection {
+            copy(nil)
+        }
         selectionAnchor = nil
     }
 

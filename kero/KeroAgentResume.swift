@@ -57,7 +57,7 @@ enum KeroAgentResume {
         else { return nil }
         let arguments = record.processID.flatMap { processArguments(pid: $0) } ?? []
         var parts = ["cd", shellQuote(record.directory), "&&", record.kind.executable]
-        parts.append(contentsOf: preserved(from: arguments).map(shellQuote))
+        parts.append(contentsOf: preserved(from: arguments))
         parts.append("--resume")
         parts.append(shellQuote(record.sessionID))
         return parts.joined(separator: " ")
@@ -95,6 +95,10 @@ enum KeroAgentResume {
         return KeroAgentKind.recognize(processID: processID) == record.kind
     }
 
+    /// Already shell-safe tokens. Flag names come from the allowlists above and
+    /// are literals, so they are emitted bare — quoting them would leave the
+    /// user staring at `claude '--dangerously-skip-permissions'` and wondering
+    /// what Kero did to their command. Values are user data and are quoted.
     private static func preserved(from arguments: [String]) -> [String] {
         var result: [String] = []
         var index = 1 // argv[0] is the executable.
@@ -105,11 +109,13 @@ enum KeroAgentResume {
             } else if preservedFlagsWithValue.contains(argument),
                       index + 1 < arguments.count {
                 result.append(argument)
-                result.append(arguments[index + 1])
+                result.append(shellQuote(arguments[index + 1]))
                 index += 1
             } else if let separator = argument.firstIndex(of: "="),
                       preservedFlagsWithValue.contains(String(argument[..<separator])) {
-                result.append(argument)
+                let name = String(argument[..<separator])
+                let value = String(argument[argument.index(after: separator)...])
+                result.append("\(name)=\(shellQuote(value))")
             }
             index += 1
         }
@@ -170,23 +176,45 @@ extension TerminalSession {
         return KeroAgentResume.command(for: record)
     }
 
-    /// Replays a restored pane's resume command once its shell is ready.
+    /// Replays a restored pane's resume command once its shell is ready *and*
+    /// the pane has a real size on screen.
     ///
-    /// The shell is still being exec'd when a restored pane is built, and a
-    /// restored pane may also be replaying scrollback, so this waits for the
-    /// shell to actually be at a prompt instead of typing into a PTY that no
-    /// one is reading yet.
+    /// Both conditions matter. The shell is still being exec'd when a restored
+    /// pane is built, so typing early goes into a PTY nobody is reading. And a
+    /// restored pane is constructed before the window lays out: a full-screen
+    /// agent that starts while the surface is still zero-sized paints its UI
+    /// for a terminal that does not exist yet, and what the user gets is a
+    /// black pane. Waiting for a laid-out surface, then letting the size settle,
+    /// means the agent's first paint is against the real grid.
     func scheduleAgentResume(_ command: String) {
         Task { @MainActor [weak self] in
-            let deadline = Date().addingTimeInterval(20)
+            let deadline = Date().addingTimeInterval(30)
+            var readySince: Date?
             while Date() < deadline {
                 guard let self, !self.hasExited else { return }
-                if self.isShellAvailableForAutomation {
-                    self.sendCommand(command + "\r")
-                    return
+                if self.isShellAvailableForAutomation, self.isSurfaceLaidOut {
+                    let now = Date()
+                    let since = readySince ?? now
+                    readySince = since
+                    // A window that is still opening resizes more than once.
+                    // Send after the size has held briefly rather than into
+                    // the middle of that.
+                    if now.timeIntervalSince(since) >= 0.4 {
+                        self.sendCommand(command + "\r")
+                        return
+                    }
+                } else {
+                    readySince = nil
                 }
-                try? await Task.sleep(for: .milliseconds(150))
+                try? await Task.sleep(for: .milliseconds(100))
             }
         }
+    }
+
+    /// Whether the pane has been placed in a window at a usable size — the
+    /// point at which the PTY's reported dimensions are the real ones.
+    private var isSurfaceLaidOut: Bool {
+        guard surface.window != nil else { return false }
+        return surface.bounds.width >= 80 && surface.bounds.height >= 40
     }
 }

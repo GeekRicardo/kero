@@ -967,7 +967,8 @@ private struct MainHeaderView: View {
                 if !manager.isLeftSidebarVisible {
                     ChromeIconButton(
                         systemImage: "sidebar.left",
-                        tooltip: "Toggle Left Sidebar (⌘B)",
+                        tooltip: "Toggle Left Sidebar",
+                        shortcut: .toggleLeftSidebar,
                         tooltipAlignment: .leading
                     ) {
                         manager.toggleLeftSidebar()
@@ -1015,7 +1016,8 @@ private struct MainHeaderView: View {
                 if manager.selectedProject != nil {
                     ChromeIconButton(
                         systemImage: "sidebar.right",
-                        tooltip: "Toggle Right Sidebar (⇧⌘B)"
+                        tooltip: "Toggle Right Sidebar",
+                        shortcut: .toggleRightSidebar
                     ) {
                         manager.toggleSidebar()
                     }
@@ -1067,7 +1069,7 @@ private struct SessionTabsView: View {
             ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: tabSpacing) {
-                    ForEach(project.tabs) { tab in
+                    ForEach(Array(project.tabs.enumerated()), id: \.element.id) { index, tab in
                         PaneTabItem(
                             tab: tab,
                             isSelected: tab.id == project.selectedTabID,
@@ -1075,6 +1077,20 @@ private struct SessionTabsView: View {
                             close: { project.close(tab) },
                             renamingTabID: $renamingTabID
                         )
+                        // Hint only, drawn over the tab's trailing corner: it
+                        // appears while the bound modifiers are held and is
+                        // otherwise zero-sized, so it never takes a click or
+                        // reflows the strip.
+                        .overlay(alignment: .topTrailing) {
+                            ShortcutHintRepresentable(
+                                action: .selectTabNumber,
+                                index: index,
+                                fontSize: 9
+                            )
+                            .allowsHitTesting(false)
+                            .padding(.top, 2)
+                            .padding(.trailing, 4)
+                        }
                         .contextMenu { tabContextMenu(for: tab) }
                         .background {
                             GeometryReader { proxy in
@@ -1170,7 +1186,8 @@ private struct SessionTabsView: View {
 
             ChromeIconButton(
                 systemImage: "plus",
-                tooltip: "New Session (⌘T)",
+                tooltip: "New Session",
+                shortcut: .newSession,
                 font: .system(size: 10, weight: .semibold),
                 iconSize: 14,
                 tooltipAlignment: .leading

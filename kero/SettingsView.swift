@@ -197,6 +197,14 @@ struct SettingsView: View {
                 }
 
                 DescribedSettingsRow(
+                    "Copy on select",
+                    description: "Puts text on the clipboard as soon as it is selected with the mouse"
+                ) {
+                    Toggle("Copy on select", isOn: $settings.copyOnSelect)
+                        .labelsHidden()
+                }
+
+                DescribedSettingsRow(
                     "Restore session history on relaunch",
                     description: "Reopened terminals show their previous scrollback above a fresh shell"
                 ) {
@@ -271,6 +279,7 @@ struct SettingsView: View {
                         && !settings.restoreTerminalHistory
                         && !settings.aiEnabled
                         && settings.notificationSound
+                        && settings.copyOnSelect
                         && !settings.shortcuts.hasCustomBindings
                         && settings.terminalBackend == .fallback)
                 }
