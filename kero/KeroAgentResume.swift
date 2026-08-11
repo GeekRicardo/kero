@@ -143,8 +143,9 @@ extension TerminalSession {
         let observed = surface.foregroundPid.flatMap { pid -> pid_t? in
             KeroAgentKind.recognize(processID: pid) == kind ? pid : nil
         }
-        let resolved = directory.flatMap {
-            KeroAgentResume.isSafeDirectory($0) ? $0 : nil
+        var resolved: String?
+        if let directory, KeroAgentResume.isSafeDirectory(directory) {
+            resolved = directory
         }
         agentResumeRecord = KeroAgentResumeRecord(
             kind: kind,
