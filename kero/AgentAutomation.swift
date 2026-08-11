@@ -396,6 +396,18 @@ final class KeroAgentObservationState {
     /// briefly so the monitor cannot mistake the still-foreground shell for
     /// an agent that already exited before it has consumed the command.
     var commandGraceDeadline: Date?
+    /// One completion notification per turn, and one attention notification
+    /// per blocker. A provider can report the end of the same turn more than
+    /// once — a nested stop, a re-delivered event — and an agent the user
+    /// already acknowledged must not re-announce itself every time they look
+    /// away. Cleared when a new turn actually begins.
+    var didNotifyCompletion = false
+    var didNotifyAttention = false
+
+    func beginTurn() {
+        didNotifyCompletion = false
+        didNotifyAttention = false
+    }
 
     func beginScreenObservation(fingerprint: Int, at date: Date = Date()) {
         screenPromptedAt = date
@@ -643,6 +655,7 @@ extension TerminalSession {
         agentObservation.integrationReason = nil
         agentObservation.integrationTurnActive = true
         agentObservation.awaitingInitialPrompt = false
+        agentObservation.beginTurn()
         agentObservation.commandGraceDeadline = nil
         agentObservation.beginScreenObservation(
             fingerprint: automationAgentScreenSnapshot(kind: status.kind).fingerprint
@@ -683,6 +696,12 @@ extension TerminalSession {
         agentObservation.commandGraceDeadline = nil
         if phase == .working || phase == .blocked {
             agentObservation.integrationTurnActive = true
+            // An agent that reports work is demonstrably past the state where
+            // it was merely created and waiting: clear the gate, or a pane
+            // Kero launched or resumed would stay `created` forever and its
+            // real completions would never be presented.
+            agentObservation.awaitingInitialPrompt = false
+            if phase == .working { agentObservation.beginTurn() }
             agentObservation.beginScreenObservation(
                 fingerprint: automationAgentScreenSnapshot(kind: kind).fingerprint
             )
@@ -730,6 +749,23 @@ extension TerminalSession {
             unseen: presentedPhase == .done
         )
         return true
+    }
+
+    /// Kero reopened a conversation the pane was holding before it quit.
+    ///
+    /// The agent will come up and settle at its prompt within seconds, and
+    /// that settling is not a task finishing — nobody asked it for anything
+    /// yet. Marking the pane as awaiting its first prompt reuses the same gate
+    /// a Kero-launched agent gets, so the restored pane reads as `created`
+    /// until the user actually submits something.
+    func markAgentSessionResumed(kind: KeroAgentKind) {
+        agentObservation.declaredKind = kind
+        agentObservation.integrationPhase = nil
+        agentObservation.integrationReason = nil
+        agentObservation.integrationTurnActive = false
+        agentObservation.awaitingInitialPrompt = true
+        agentObservation.beginTurn()
+        agentObservation.resetScreenObservation()
     }
 
     func markAutomationAgentSeen() {
@@ -1049,6 +1085,16 @@ extension TerminalSession {
               phase == .blocked || phase == .done,
               !TerminalManager.automationIsSessionFocused(id)
         else { return }
+        // At most one of each per turn. Without this, anything that re-enters
+        // the same state — a provider's idle reminder, a second stop event,
+        // focus moving away again — reads as a fresh completion.
+        if phase == .done {
+            guard !agentObservation.didNotifyCompletion else { return }
+            agentObservation.didNotifyCompletion = true
+        } else {
+            guard !agentObservation.didNotifyAttention else { return }
+            agentObservation.didNotifyAttention = true
+        }
         TerminalNotificationService.shared.post(
             message: phase == .blocked
                 ? String(localized: "\(alias) needs attention")

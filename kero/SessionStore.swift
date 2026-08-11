@@ -44,6 +44,9 @@ struct SessionSnapshot: Codable {
             /// so relaunching Kero does not abandon the agent's context.
             /// Optional so older snapshots still decode.
             var resumeCommand: String?
+            /// Which agent that command reopens. Travels with the command so a
+            /// restored pane never has to guess whose conversation it is.
+            var resumeAgent: String?
         }
 
         struct ColumnSnapshot: Codable {

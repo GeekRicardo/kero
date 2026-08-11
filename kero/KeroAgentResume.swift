@@ -168,14 +168,15 @@ extension TerminalSession {
         agentResumeRecord = nil
     }
 
-    /// The command that would restore this pane's agent conversation, or nil
-    /// when there is nothing to restore.
-    var agentResumeCommand: String? {
+    /// What would restore this pane's agent conversation, or nil when there is
+    /// nothing to restore.
+    var agentResumeLaunch: (command: String, kind: KeroAgentKind)? {
         guard !hasExited,
               let record = agentResumeRecord,
-              KeroAgentResume.isLive(record)
+              KeroAgentResume.isLive(record),
+              let command = KeroAgentResume.command(for: record)
         else { return nil }
-        return KeroAgentResume.command(for: record)
+        return (command, record.kind)
     }
 
     /// Replays a restored pane's resume command once its shell is ready *and*
@@ -188,7 +189,7 @@ extension TerminalSession {
     /// for a terminal that does not exist yet, and what the user gets is a
     /// black pane. Waiting for a laid-out surface, then letting the size settle,
     /// means the agent's first paint is against the real grid.
-    func scheduleAgentResume(_ command: String) {
+    func scheduleAgentResume(_ command: String, kind: KeroAgentKind) {
         Task { @MainActor [weak self] in
             let deadline = Date().addingTimeInterval(30)
             var readySince: Date?
@@ -202,6 +203,7 @@ extension TerminalSession {
                     // Send after the size has held briefly rather than into
                     // the middle of that.
                     if now.timeIntervalSince(since) >= 0.4 {
+                        self.markAgentSessionResumed(kind: kind)
                         self.sendCommand(command + "\r")
                         return
                     }

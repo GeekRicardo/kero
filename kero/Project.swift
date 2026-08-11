@@ -833,7 +833,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             return .pane(Pane(content: makeContent(
                 from: pane.content,
                 restoredHistory: restoredHistory,
-                resumeCommand: pane.resumeCommand
+                resumeCommand: pane.resumeCommand,
+                resumeAgent: pane.resumeAgent
             )))
         case .split(let axis, let fraction, let first, let second):
             return .split(PaneSplit(
@@ -848,15 +849,17 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     private func makeContent(
         from snap: SessionSnapshot.ProjectSnapshot.PaneContentSnapshot,
         restoredHistory: String? = nil,
-        resumeCommand: String? = nil
+        resumeCommand: String? = nil,
+        resumeAgent: String? = nil
     ) -> PaneContent {
         switch snap {
         case .session(let workingDirectory):
             let session = makeSession(
                 directory: workingDirectory, restoredHistory: restoredHistory
             )
-            if let resumeCommand {
-                session.scheduleAgentResume(resumeCommand)
+            if let resumeCommand,
+               let kind = resumeAgent.flatMap(KeroAgentKind.init(rawValue:)) {
+                session.scheduleAgentResume(resumeCommand, kind: kind)
             }
             return .session(session)
         case .file(let path, let editorState):

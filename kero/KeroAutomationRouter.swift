@@ -993,7 +993,7 @@ enum KeroAutomationRouter {
         return success(request, .object([
             "terminal_id": .string(session.id.uuidString),
             "session_id": .string(sessionID),
-            "resumable": .bool(session.agentResumeCommand != nil),
+            "resumable": .bool(session.agentResumeLaunch != nil),
         ]))
     }
 

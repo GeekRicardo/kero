@@ -937,7 +937,7 @@ final class TerminalManager: nonisolated ObservableObject {
         switch layout {
         case .pane(let pane):
             var historyKey: String?
-            var resumeCommand: String?
+            var resume: (command: String, kind: KeroAgentKind)?
             if case .session(let session) = pane.content {
                 if let history = session.serializedHistory(
                     captureLive: captureTerminalHistory
@@ -946,13 +946,14 @@ final class TerminalManager: nonisolated ObservableObject {
                     histories[key] = history
                     historyKey = key
                 }
-                resumeCommand = session.agentResumeCommand
+                resume = session.agentResumeLaunch
             }
             return .pane(ProjectSnapshot.PaneSnapshot(
                 content: contentSnapshot(pane.content),
                 weight: 1,
                 historyKey: historyKey,
-                resumeCommand: resumeCommand
+                resumeCommand: resume?.command,
+                resumeAgent: resume?.kind.rawValue
             ))
         case .split(let split):
             return .split(
