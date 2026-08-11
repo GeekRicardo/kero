@@ -739,7 +739,7 @@ private struct SessionPaneHeaderTitle: View {
     var body: some View {
         PaneHeaderLabel(
             systemImage: "terminal",
-            title: session.title,
+            title: session.displayName,
             isFocused: isFocused,
             agentRollup: session.agentRollup
         )

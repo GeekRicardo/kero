@@ -721,7 +721,7 @@ private struct TabPaneThumbnail: View {
                 Image(systemName: "terminal")
                     .font(.system(size: 17, weight: .light))
                     .foregroundStyle(Color(nsColor: Theme.accent))
-                Text(session.title)
+                Text(session.displayName)
                     .font(.system(size: 8, weight: .medium))
                     .lineLimit(1)
                 Text(session.currentDirectoryPath)

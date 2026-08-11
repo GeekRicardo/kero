@@ -1628,6 +1628,10 @@ enum KeroAutomationCommandLine {
         least four characters; omit it to mean the invoking terminal. An
         ambiguous prefix is refused rather than guessed.
 
+        An alias is also what the terminal is called on screen: `rename` shows
+        in the tab, pane header, and switcher, in place of the running
+        program's own title. A name set with `kero +tab rename` outranks it.
+
         Reading has two paths. `read` follows along: it returns only what
         arrived since the last read for that cursor and advances it, capped at
         \(KeroAutomationDefaults.readLines) lines with the remainder reported, not

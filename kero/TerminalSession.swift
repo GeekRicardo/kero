@@ -60,7 +60,10 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     let shellCommand = KeroAutomationShellCommand()
     /// Short project-local name an automation client can target instead of a
     /// UUID. Independent of the agent alias: a plain shell has no agent.
-    var automationAlias: String?
+    ///
+    /// Published because it is also what the terminal is *called*: naming a
+    /// pane and seeing nothing change would make the name feel imaginary.
+    @Published var automationAlias: String?
     /// The agent conversation open in this terminal, as reported by that
     /// provider's own lifecycle hooks: written when the conversation starts,
     /// cleared when it ends. Kero never infers it from the screen — a wrong id
@@ -287,6 +290,18 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         case .failed:
             return lastHistorySnapshot
         }
+    }
+
+    /// What this terminal is called in tabs, pane headers, the switcher, and
+    /// the palette.
+    ///
+    /// An alias is a deliberate name for the terminal, so it outranks the live
+    /// title the running program sets — that is the whole point of setting one.
+    /// A tab's own name still wins over both: `PaneTab.displayTitle` checks
+    /// `customName` first.
+    var displayName: String {
+        if let automationAlias, !automationAlias.isEmpty { return automationAlias }
+        return title
     }
 
     var shellName: String {

@@ -40,7 +40,7 @@ extension PaneContent {
     /// Label for the tab strip and pane chrome — the focused content's title.
     @MainActor var title: String {
         switch self {
-        case .session(let session): return session.title
+        case .session(let session): return session.displayName
         case .file(let file): return file.name
         case .browser(let browser): return browser.title
         case .diff(let diff): return diff.title

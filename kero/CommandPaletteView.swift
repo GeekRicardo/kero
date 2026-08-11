@@ -314,12 +314,12 @@ struct CommandPaletteView: View {
         manager.projects.flatMap { project in
             project.sessions.map { session in
                 let directory = sessionDirectory(session)
-                let search = [session.title, project.name, directory]
+                let search = [session.displayName, project.name, directory]
                     .compactMap { $0 }
                     .joined(separator: " ")
                 return PaletteCommand(
                     id: "session-\(session.id)",
-                    verbatimTitle: session.title,
+                    verbatimTitle: session.displayName,
                     systemImage: "terminal",
                     subtitle: directory,
                     section: .session,

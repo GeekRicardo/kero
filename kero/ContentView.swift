@@ -1489,7 +1489,7 @@ private struct SessionTabLabel: View {
     var body: some View {
         TabItemChrome(
             systemImage: "terminal",
-            title: customTitle ?? session.title,
+            title: customTitle ?? session.displayName,
             paneCount: paneCount,
             agentRollup: agentRollup,
             isSelected: isSelected,

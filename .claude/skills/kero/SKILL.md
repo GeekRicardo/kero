@@ -40,8 +40,12 @@ kero +term keys                          # every key name --key accepts
 
 `TARGET` is an alias, a full pane or terminal id, or an id prefix of at least
 four characters. Omit it to mean the terminal you are running in. An ambiguous
-prefix is refused, never guessed. Give new terminals an alias — it is what makes
-the pane legible to the user and to your next command.
+prefix is refused, never guessed.
+
+Give new terminals an alias. It is how your next command addresses them, and it
+is also what the user sees: the alias replaces the running program's title in
+the tab, the pane header, and the switcher, so a pane you created says what it
+is for instead of being one more tab called "zsh".
 
 Output is JSON. `--plain` prints just the text, sends notes to stderr, and makes
 `exec` exit with the command's own status.
@@ -196,7 +200,9 @@ kero +tab rename 'refactor auth'     # renames the caller's tab
 kero +tab rename --clear             # back to the automatic title
 ```
 
-This only ever renames the tab the command runs in. Use it when a long task
+This only ever renames the tab the command runs in, and outranks any alias.
+To name a *terminal* rather than a tab — including one in another pane — use
+`kero +term rename TARGET --alias NAME`. Use it when a long task
 would otherwise leave the user staring at a strip of identically named tabs.
 
 ## Rules

@@ -844,6 +844,10 @@ enum KeroAutomationRouter {
             )
         }
 
+        // The alias names the pane as well as the agent: a delegated worker
+        // the user never asked for should at least say what it is for, rather
+        // than sitting in the strip as another tab called "claude".
+        session.automationAlias = alias
         session.declareAutomationAgent(alias: alias, kind: kind)
         let command = ([kind.executable] + extra).map(shellQuote).joined(separator: " ")
         session.sendCommand(command + "\r")
