@@ -22,8 +22,14 @@ final class TerminalNotificationService: NSObject, UNUserNotificationCenterDeleg
     private var isRequestingAuthorization = false
     private var pending: (message: String, sessionID: UUID?)?
 
+    /// Mirrors the "Play a sound" setting. Held here rather than read from
+    /// `AppSettings` at delivery time because delivery happens inside
+    /// Notification Center's own callbacks; the setting pushes changes in.
+    var isSoundEnabled = true
+
     func configure() {
         center.delegate = self
+        isSoundEnabled = AppSettings.shared.notificationSound
         // Existing installs may have been authorized for alerts only (before
         // sound support). Re-request so System Settings gains the sound toggle
         // and delivered notifications can play audio — no prompt when already
@@ -121,7 +127,7 @@ final class TerminalNotificationService: NSObject, UNUserNotificationCenterDeleg
         let content = UNMutableNotificationContent()
         content.title = "Kero"
         content.body = message
-        content.sound = .default
+        content.sound = isSoundEnabled ? .default : nil
         if let sessionID {
             content.userInfo = [Self.sessionIDKey: sessionID.uuidString]
         }
@@ -143,7 +149,9 @@ final class TerminalNotificationService: NSObject, UNUserNotificationCenterDeleg
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .list, .sound])
+        // Kero is frontmost here, so this is the path that decides whether a
+        // finished agent is audible while the user is looking at another pane.
+        completionHandler(isSoundEnabled ? [.banner, .list, .sound] : [.banner, .list])
     }
 
     func userNotificationCenter(

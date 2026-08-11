@@ -13,7 +13,7 @@ final class AgentCLISupportSettingsView: NSView {
     private let titleLabel = NSTextField(labelWithString: String(localized: "AI"))
     private let detailLabel = NSTextField(
         wrappingLabelWithString: String(
-            localized: "Lets agents delegate work and coordinate across Kero panes"
+            localized: "Lets agents delegate work across Kero panes, and adds Claude Code lifecycle notifications, /rename, and conversation resume"
         )
     )
     private let errorLabel = NSTextField(wrappingLabelWithString: "")

@@ -574,6 +574,8 @@ private func printHelp() {
           kero +themes [--dark | --light]
           kero +themes --list [--dark | --light]
           kero +pane <command> [options]
+          kero +term <command> [options]
+          kero +tab <command> [options]
           kero +agent <command> [options]
           kero +help
 
@@ -584,11 +586,13 @@ private func printHelp() {
         previews the theme across the whole app; Return saves it and Esc
         restores the previous theme.
 
-        +pane provides project-scoped terminal layout, input, viewport reads,
-        and output waits. +agent adds recognized-agent start, guarded prompts,
-        passive lifecycle waits, result reads, and an installable, auto-updating
-        skill for compatible coding agents. Run either command with --help for
-        its complete contract.
+        +pane provides project-scoped terminal layout, input, and viewport
+        reads. +term drives a terminal: control keys, incremental and
+        line-numbered reads, waits for silence or a pattern, and running one
+        command for its own exit code. +agent adds recognized-agent start,
+        guarded prompts, passive lifecycle waits, result reads, and an
+        installable, auto-updating skill for compatible coding agents. Run any
+        of them with --help for its complete contract.
         """)
     )
 }
@@ -599,7 +603,8 @@ private func run() throws {
         printHelp()
         return
     }
-    if arguments.first == "+pane" || arguments.first == "+agent" {
+    if arguments.first == "+pane" || arguments.first == "+term"
+        || arguments.first == "+tab" || arguments.first == "+agent" {
         try KeroAutomationCommandLine.run(
             namespace: arguments[0],
             arguments: Array(arguments.dropFirst())

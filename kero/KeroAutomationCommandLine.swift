@@ -3,6 +3,7 @@
 //  kero
 //
 
+import Darwin
 import Foundation
 
 /// Script-facing wrappers for Kero's local automation protocol. Pane and agent
@@ -11,7 +12,12 @@ import Foundation
 enum KeroAutomationCommandLine {
     static func run(namespace: String, arguments: [String]) throws {
         if arguments.isEmpty || arguments == ["--help"] || arguments == ["-h"] {
-            namespace == "+pane" ? printPaneHelp() : printAgentHelp()
+            switch namespace {
+            case "+pane": printPaneHelp()
+            case "+term": printTerminalHelp()
+            case "+tab": printTabHelp()
+            default: printAgentHelp()
+            }
             return
         }
         if namespace == "+agent", arguments == ["explain"] {
@@ -32,6 +38,13 @@ enum KeroAutomationCommandLine {
         switch namespace {
         case "+pane":
             result = try runPane(arguments, connection: connection)
+        case "+term":
+            // Terminal commands choose their own presentation: JSON by
+            // default, plain output with --plain.
+            try runTerminal(arguments, connection: connection)
+            return
+        case "+tab":
+            result = try runTab(arguments, connection: connection)
         case "+agent":
             result = try runAgent(arguments, connection: connection)
         default:
@@ -217,12 +230,589 @@ enum KeroAutomationCommandLine {
         throw CLIError.message("Timed out waiting for terminal output containing \(needle.debugDescription).")
     }
 
+    // MARK: - Tab commands
+
+    private static func runTab(
+        _ arguments: [String],
+        connection: AppConnection
+    ) throws -> KeroJSONValue {
+        let command = arguments[0]
+        let tail = Array(arguments.dropFirst())
+        switch command {
+        case "rename":
+            return try renameTab(tail, connection: connection)
+        case "get":
+            try requireNoArguments(tail, command: "+tab get")
+            return try connection.automationRequest(method: "tab.get")
+        case "help", "--help", "-h":
+            printTabHelp()
+            return .object(["help": .bool(true)])
+        default:
+            throw CLIError.message(
+                "Unknown +tab command \(command). Run `kero +tab --help`."
+            )
+        }
+    }
+
+    private static func renameTab(
+        _ arguments: [String],
+        connection: AppConnection
+    ) throws -> KeroJSONValue {
+        var words: [String] = []
+        var clear = false
+        var index = 0
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--":
+                // Everything after `--` is the name, so a name that starts with
+                // a dash is still a name.
+                words.append(contentsOf: arguments.dropFirst(index + 1))
+                index = arguments.count
+                continue
+            case "--clear", "--reset":
+                clear = true
+            default:
+                guard !arguments[index].hasPrefix("--") else {
+                    throw unknownOption(arguments[index], command: "+tab rename")
+                }
+                words.append(arguments[index])
+            }
+            index += 1
+        }
+        let name = words.joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clear || !name.isEmpty else {
+            throw CLIError.message(
+                "`kero +tab rename` requires a name, or --clear to restore the automatic title."
+            )
+        }
+        return try connection.automationRequest(
+            method: "tab.rename",
+            params: ["name": clear ? .null : .string(name)]
+        )
+    }
+
+    private static func printTabHelp() {
+        print("""
+        Usage:
+          kero +tab get
+          kero +tab rename NAME
+          kero +tab rename --clear
+
+        Renames the tab holding the invoking terminal. `--clear` restores the
+        automatic title. Everything after `--` is taken as the name, so a name
+        beginning with a dash still works.
+        """)
+    }
+
+    // MARK: - Terminal commands
+
+    /// Options shared by every `+term` command: which terminal, and how the
+    /// answer should be presented.
+    private struct TerminalOptions {
+        var target: String?
+        var text = false
+    }
+
+    private static func runTerminal(
+        _ arguments: [String],
+        connection: AppConnection
+    ) throws {
+        let command = arguments[0]
+        let tail = Array(arguments.dropFirst())
+        switch command {
+        case "list":
+            try requireNoArguments(tail, command: "+term list")
+            try printJSON(try connection.automationRequest(method: "term.list"))
+        case "new":
+            try printJSON(try newTerminal(tail, connection: connection))
+        case "close":
+            try printJSON(try closeTerminal(tail, connection: connection))
+        case "rename":
+            try printJSON(try renameTerminal(tail, connection: connection))
+        case "send":
+            try printJSON(try sendToTerminal(tail, connection: connection))
+        case "read":
+            try readTerminal(tail, connection: connection)
+        case "history":
+            try readTerminalHistory(tail, connection: connection)
+        case "wait":
+            try waitOnTerminal(tail, connection: connection)
+        case "exec":
+            try execInTerminal(tail, connection: connection)
+        case "result":
+            try collectTerminalResult(tail, connection: connection)
+        case "keys":
+            try requireNoArguments(tail, command: "+term keys")
+            print(KeroAutomationKey.names.joined(separator: "\n"))
+        case "help", "--help", "-h":
+            printTerminalHelp()
+        default:
+            throw CLIError.message(
+                "Unknown +term command \(command). Run `kero +term --help`."
+            )
+        }
+    }
+
+    private static func newTerminal(
+        _ arguments: [String],
+        connection: AppConnection
+    ) throws -> KeroJSONValue {
+        var params: [String: KeroJSONValue] = [:]
+        var focus = false
+        var index = 0
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--alias":
+                params["alias"] = .string(
+                    try value(after: &index, in: arguments, option: "--alias")
+                )
+            case "--cwd":
+                params["cwd"] = .string(
+                    try value(after: &index, in: arguments, option: "--cwd")
+                )
+            case "--target":
+                params["target"] = .string(
+                    try value(after: &index, in: arguments, option: "--target")
+                )
+            case "--split":
+                params["edge"] = .string(
+                    try value(after: &index, in: arguments, option: "--split")
+                )
+            case "--left": params["edge"] = .string("left")
+            case "--right": params["edge"] = .string("right")
+            case "--up", "--top": params["edge"] = .string("top")
+            case "--down", "--bottom": params["edge"] = .string("bottom")
+            case "--focus": focus = true
+            case "--no-focus": focus = false
+            default: throw unknownOption(arguments[index], command: "+term new")
+            }
+            index += 1
+        }
+        params["focus"] = .bool(focus)
+        return try connection.automationRequest(method: "pane.new", params: params)
+    }
+
+    private static func closeTerminal(
+        _ arguments: [String],
+        connection: AppConnection
+    ) throws -> KeroJSONValue {
+        var options = TerminalOptions()
+        var closesTab = false
+        var index = 0
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--tab": closesTab = true
+            default:
+                try absorbTarget(arguments, at: &index, into: &options, command: "+term close")
+            }
+            index += 1
+        }
+        var params = targetParams(options)
+        params["tab"] = .bool(closesTab)
+        return try connection.automationRequest(method: "pane.close", params: params)
+    }
+
+    private static func renameTerminal(
+        _ arguments: [String],
+        connection: AppConnection
+    ) throws -> KeroJSONValue {
+        var options = TerminalOptions()
+        var alias: String?
+        var index = 0
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--alias":
+                alias = try value(after: &index, in: arguments, option: "--alias")
+            default:
+                try absorbTarget(arguments, at: &index, into: &options, command: "+term rename")
+            }
+            index += 1
+        }
+        guard let alias else {
+            throw CLIError.message("`kero +term rename` requires --alias.")
+        }
+        var params = targetParams(options)
+        params["alias"] = .string(alias)
+        return try connection.automationRequest(method: "term.rename", params: params)
+    }
+
+    private static func sendToTerminal(
+        _ arguments: [String],
+        connection: AppConnection
+    ) throws -> KeroJSONValue {
+        var options = TerminalOptions()
+        var text: String?
+        var keys: [String] = []
+        var enter: Bool?
+        var positional: [String] = []
+        var index = 0
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--text":
+                text = try value(after: &index, in: arguments, option: "--text")
+            case "--key":
+                keys.append(try value(after: &index, in: arguments, option: "--key"))
+            case "--enter": enter = true
+            case "--no-enter", "--no-newline": enter = false
+            case "--target":
+                options.target = try value(after: &index, in: arguments, option: "--target")
+            case "--current":
+                options.target = nil
+            default:
+                guard !arguments[index].hasPrefix("--") else {
+                    throw unknownOption(arguments[index], command: "+term send")
+                }
+                positional.append(arguments[index])
+            }
+            index += 1
+        }
+        // `+term send TARGET TEXT`: the first bare word names the terminal,
+        // the rest is what to type.
+        if options.target == nil, !positional.isEmpty {
+            options.target = positional.removeFirst()
+        }
+        if text == nil, !positional.isEmpty {
+            text = positional.joined(separator: " ")
+            positional.removeAll()
+        }
+        guard positional.isEmpty else {
+            throw CLIError.message("Unexpected extra arguments after the text to send.")
+        }
+        guard text != nil || !keys.isEmpty || enter == true else {
+            throw CLIError.message(
+                "`kero +term send` needs text, --key NAME, or --enter."
+            )
+        }
+
+        var params = targetParams(options)
+        if let text { params["text"] = .string(text) }
+        if !keys.isEmpty { params["keys"] = .array(keys.map(KeroJSONValue.string)) }
+        // Typing a line and not running it is almost never what was meant, so
+        // text implies Return unless --no-enter says otherwise. A bare key send
+        // stays literal.
+        params["enter"] = .bool(enter ?? (text != nil))
+        return try connection.automationRequest(method: "term.write", params: params)
+    }
+
+    private static func readTerminal(
+        _ arguments: [String],
+        connection: AppConnection
+    ) throws {
+        var options = TerminalOptions()
+        var params: [String: KeroJSONValue] = [:]
+        var index = 0
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--cursor":
+                params["cursor"] = .string(
+                    try value(after: &index, in: arguments, option: "--cursor")
+                )
+            case "--max-lines", "--lines":
+                params["max_lines"] = .number(Double(
+                    try integerValue(after: &index, in: arguments, option: "--max-lines")
+                ))
+            case "--rewind":
+                params["rewind"] = .bool(true)
+            default:
+                try absorbTarget(arguments, at: &index, into: &options, command: "+term read")
+            }
+            index += 1
+        }
+        params.merge(targetParams(options)) { current, _ in current }
+        let result = try connection.automationRequest(method: "term.read", params: params)
+        try present(result, asText: options.text)
+    }
+
+    private static func readTerminalHistory(
+        _ arguments: [String],
+        connection: AppConnection
+    ) throws {
+        var options = TerminalOptions()
+        var params: [String: KeroJSONValue] = [:]
+        var index = 0
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--lines":
+                params["lines"] = .number(Double(
+                    try integerValue(after: &index, in: arguments, option: "--lines")
+                ))
+            case "--start", "--start-line":
+                params["start_line"] = .number(Double(
+                    try integerValue(after: &index, in: arguments, option: "--start")
+                ))
+            case "--end", "--end-line":
+                params["end_line"] = .number(Double(
+                    try integerValue(after: &index, in: arguments, option: "--end")
+                ))
+            default:
+                try absorbTarget(arguments, at: &index, into: &options, command: "+term history")
+            }
+            index += 1
+        }
+        params.merge(targetParams(options)) { current, _ in current }
+        let result = try connection.automationRequest(method: "term.history", params: params)
+        try present(result, asText: options.text)
+    }
+
+    private static func waitOnTerminal(
+        _ arguments: [String],
+        connection: AppConnection
+    ) throws {
+        var options = TerminalOptions()
+        var params: [String: KeroJSONValue] = [:]
+        var timeoutMS = 30_000
+        var index = 0
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--idle":
+                params["idle_ms"] = .number(Double(
+                    try integerValue(after: &index, in: arguments, option: "--idle")
+                ))
+            case "--match":
+                params["match"] = .string(
+                    try value(after: &index, in: arguments, option: "--match")
+                )
+            case "--exit":
+                params["exit"] = .bool(true)
+            case "--cursor":
+                params["cursor"] = .string(
+                    try value(after: &index, in: arguments, option: "--cursor")
+                )
+            case "--timeout":
+                timeoutMS = try integerValue(after: &index, in: arguments, option: "--timeout")
+            default:
+                try absorbTarget(arguments, at: &index, into: &options, command: "+term wait")
+            }
+            index += 1
+        }
+        try validateTimeout(timeoutMS)
+        params["timeout_ms"] = .number(Double(timeoutMS))
+        params.merge(targetParams(options)) { current, _ in current }
+        let result = try connection.automationRequest(
+            method: "term.wait",
+            params: params,
+            timeout: socketTimeout(forWait: timeoutMS)
+        )
+        try present(result, asText: options.text)
+    }
+
+    private static func execInTerminal(
+        _ arguments: [String],
+        connection: AppConnection
+    ) throws {
+        var options = TerminalOptions()
+        var params: [String: KeroJSONValue] = [:]
+        var command: String?
+        var positional: [String] = []
+        var timeoutMS = KeroAutomationDefaults.execTimeoutMilliseconds
+        var background = false
+        var index = 0
+        while index < arguments.count {
+            if arguments[index] == "--" {
+                let argv = Array(arguments.dropFirst(index + 1))
+                guard !argv.isEmpty else {
+                    throw CLIError.message("No command was provided after `--`.")
+                }
+                command = argv.map(shellQuote).joined(separator: " ")
+                break
+            }
+            switch arguments[index] {
+            case "--command":
+                command = try value(after: &index, in: arguments, option: "--command")
+            case "--background": background = true
+            case "--silent":
+                params["silent_ms"] = .number(Double(
+                    try integerValue(after: &index, in: arguments, option: "--silent")
+                ))
+            case "--timeout":
+                timeoutMS = try integerValue(after: &index, in: arguments, option: "--timeout")
+            case "--replace":
+                params["replace"] = .bool(true)
+            case "--target":
+                options.target = try value(after: &index, in: arguments, option: "--target")
+            case "--current":
+                options.target = nil
+            case "--plain":
+                options.text = true
+            case "--json":
+                options.text = false
+            default:
+                guard !arguments[index].hasPrefix("--") else {
+                    throw unknownOption(arguments[index], command: "+term exec")
+                }
+                positional.append(arguments[index])
+            }
+            index += 1
+        }
+        if options.target == nil, !positional.isEmpty {
+            options.target = positional.removeFirst()
+        }
+        if command == nil, !positional.isEmpty {
+            command = positional.joined(separator: " ")
+            positional.removeAll()
+        }
+        guard positional.isEmpty else {
+            throw CLIError.message("Unexpected extra arguments after the command.")
+        }
+        guard let command, !command.isEmpty else {
+            throw CLIError.message(
+                "`kero +term exec` requires a command, either quoted or after `--`."
+            )
+        }
+        try validateTimeout(timeoutMS)
+        params["command"] = .string(command)
+        params["background"] = .bool(background)
+        params["timeout_ms"] = .number(Double(timeoutMS))
+        params.merge(targetParams(options)) { current, _ in current }
+        let result = try connection.automationRequest(
+            method: "term.exec",
+            params: params,
+            timeout: background ? 15 : socketTimeout(forWait: timeoutMS)
+        )
+        try presentExec(result, asText: options.text)
+    }
+
+    private static func collectTerminalResult(
+        _ arguments: [String],
+        connection: AppConnection
+    ) throws {
+        var options = TerminalOptions()
+        var params: [String: KeroJSONValue] = [:]
+        var timeoutMS = KeroAutomationDefaults.collectTimeoutMilliseconds
+        var immediate = false
+        var index = 0
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--timeout":
+                timeoutMS = try integerValue(after: &index, in: arguments, option: "--timeout")
+            case "--abandon":
+                params["abandon"] = .bool(true)
+                immediate = true
+            case "--interrupt":
+                params["interrupt"] = .bool(true)
+                immediate = true
+            default:
+                try absorbTarget(arguments, at: &index, into: &options, command: "+term result")
+            }
+            index += 1
+        }
+        try validateTimeout(timeoutMS)
+        params["timeout_ms"] = .number(Double(timeoutMS))
+        params.merge(targetParams(options)) { current, _ in current }
+        let result = try connection.automationRequest(
+            method: "term.result",
+            params: params,
+            timeout: immediate ? 15 : socketTimeout(forWait: timeoutMS)
+        )
+        try presentExec(result, asText: options.text)
+    }
+
+    // MARK: - Terminal presentation
+
+    /// Consumes a `--target`/`--current`/`--text` option or a bare positional
+    /// target, so every `+term` command spells targeting the same way.
+    private static func absorbTarget(
+        _ arguments: [String],
+        at index: inout Int,
+        into options: inout TerminalOptions,
+        command: String
+    ) throws {
+        switch arguments[index] {
+        case "--target":
+            options.target = try value(after: &index, in: arguments, option: "--target")
+        case "--current":
+            options.target = nil
+        case "--plain":
+            options.text = true
+        case "--json":
+            options.text = false
+        default:
+            guard !arguments[index].hasPrefix("--"), options.target == nil else {
+                throw unknownOption(arguments[index], command: command)
+            }
+            options.target = arguments[index]
+        }
+    }
+
+    private static func targetParams(_ options: TerminalOptions) -> [String: KeroJSONValue] {
+        options.target.map { ["target": KeroJSONValue.string($0)] } ?? [:]
+    }
+
+    /// The socket has to outlive the wait the app is performing on the caller's
+    /// behalf, with enough slack for the response itself.
+    private static func socketTimeout(forWait milliseconds: Int) -> TimeInterval {
+        Double(milliseconds) / 1_000 + 15
+    }
+
+    private static func present(_ result: KeroJSONValue, asText: Bool) throws {
+        guard asText else {
+            try printJSON(result)
+            return
+        }
+        let object = result.objectValue
+        if let text = object?["text"]?.stringValue, !text.isEmpty {
+            print(text)
+        }
+        if let reason = object?["reason"]?.stringValue {
+            note("wait ended: \(reason)")
+        }
+        if let omitted = object?["omitted_lines"]?.intValue, omitted > 0 {
+            note("\(omitted) earlier lines omitted")
+        }
+        if let hint = object?["hint"]?.stringValue {
+            note(hint)
+        }
+    }
+
+    private static func presentExec(_ result: KeroJSONValue, asText: Bool) throws {
+        guard asText else {
+            try printJSON(result)
+            return
+        }
+        let object = result.objectValue
+        if let output = object?["output"]?.stringValue, !output.isEmpty {
+            print(output)
+        }
+        if let hint = object?["hint"]?.stringValue {
+            note(hint)
+        }
+        let status = object?["status"]?.stringValue ?? "running"
+        guard status == "completed", let code = object?["exit_code"]?.intValue else {
+            note("status: \(status)")
+            return
+        }
+        // Plain mode is the shell-shaped one, so the command's status becomes
+        // this process's status. JSON mode leaves it in `exit_code` instead, so
+        // a caller reading JSON never mistakes a failing command for a failing
+        // tool.
+        guard code != 0 else { return }
+        exit(Int32(truncatingIfNeeded: code))
+    }
+
+    /// Side-channel notes go to stderr so piping the output stays clean, and
+    /// pick up color only when a person is actually looking at them.
+    private static func note(_ message: String) {
+        let decorated = isatty(STDERR_FILENO) == 1
+            ? "\u{1b}[2mkero:\u{1b}[0m \(message)"
+            : "kero: \(message)"
+        FileHandle.standardError.write(Data((decorated + "\n").utf8))
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     // MARK: - Agent commands
 
     /// Private entry point for lifecycle hooks installed by Kero. It is
     /// intentionally absent from help and never appears in an agent prompt.
     /// Hook failures stay passive: screen detection remains the fallback.
     private static func runAgentIntegration(_ arguments: [String]) {
+        if arguments.first == "claude" {
+            runClaudeIntegration(Array(arguments.dropFirst()))
+            return
+        }
         guard arguments.count == 2 || arguments.count == 3,
               arguments[0] == "grok",
               let phase = KeroAgentPhase(rawValue: arguments[1]),
@@ -255,6 +845,53 @@ enum KeroAutomationCommandLine {
             ],
             timeout: 1
         )
+    }
+
+    /// Claude Code's hooks post a JSON event on stdin. Every event carries the
+    /// conversation id, so one handler both drives the lifecycle badge and
+    /// records what a later relaunch needs to resume this conversation.
+    ///
+    /// Failures stay silent: a hook that reports an error interrupts the user's
+    /// agent, and screen detection remains the fallback either way.
+    private static func runClaudeIntegration(_ arguments: [String]) {
+        guard let phase = arguments.first, arguments.count == 1 else { return }
+        let event = readIntegrationEvent()
+        guard let connection = try? AppConnection() else { return }
+
+        if let sessionID = event?["session_id"]?.stringValue {
+            // Kero takes the working directory from the live process at quit,
+            // not from this event: an agent that moved itself to another
+            // worktree must resume in the tree it ended up in.
+            _ = try? connection.automationRequest(
+                method: "agent.session",
+                params: [
+                    "kind": .string(KeroAgentKind.claude.rawValue),
+                    "session_id": .string(sessionID),
+                ],
+                timeout: 1
+            )
+        }
+
+        guard phase != "session",
+              let reported = KeroAgentPhase(rawValue: phase) else { return }
+        _ = try? connection.automationRequest(
+            method: "agent.report",
+            params: [
+                "state": .string(reported.rawValue),
+                "reason": .string("Claude Code lifecycle hook"),
+            ],
+            timeout: 1
+        )
+    }
+
+    private static func readIntegrationEvent() -> [String: KeroJSONValue]? {
+        // Hooks are invoked with the event on stdin. Run by hand from a
+        // terminal there is no event and reading would hang waiting for the
+        // user, so a terminal stdin means there is nothing to read.
+        guard isatty(STDIN_FILENO) == 0 else { return nil }
+        let data = FileHandle.standardInput.readDataToEndOfFile()
+        guard !data.isEmpty, data.count <= 1_048_576 else { return nil }
+        return (try? JSONDecoder().decode(KeroJSONValue.self, from: data))?.objectValue
     }
 
     private static func runAgentSkill(_ arguments: [String]) throws {
@@ -957,6 +1594,50 @@ enum KeroAutomationCommandLine {
         """)
     }
 
+    private static func printTerminalHelp() {
+        print("""
+        Usage:
+          kero +term list
+          kero +term new [--alias NAME] [--cwd PATH] [--split right|left|up|down] [--focus]
+          kero +term close [TARGET] [--tab]
+          kero +term rename TARGET --alias NAME
+          kero +term send [TARGET] [TEXT] [--key NAME]... [--no-enter]
+          kero +term read [TARGET] [--cursor NAME] [--max-lines N] [--rewind] [--plain]
+          kero +term history [TARGET] [--lines N | --start N --end M] [--plain]
+          kero +term wait [TARGET] [--idle MS] [--match REGEX] [--exit] [--cursor NAME] [--timeout MS]
+          kero +term exec [TARGET] 'COMMAND' [--background] [--silent MS] [--timeout MS] [--replace] [--plain]
+          kero +term result [TARGET] [--timeout MS] [--abandon] [--interrupt]
+          kero +term keys
+
+        TARGET is an alias, a full pane or terminal id, or an id prefix of at
+        least four characters; omit it to mean the invoking terminal. An
+        ambiguous prefix is refused rather than guessed.
+
+        Reading has two paths. `read` follows along: it returns only what
+        arrived since the last read for that cursor and advances it, capped at
+        \(KeroAutomationDefaults.readLines) lines with the remainder reported, not
+        hidden. `history` looks back by absolute line number and returns the
+        last \(KeroAutomationDefaults.historyLines) lines when asked for nothing
+        in particular.
+
+        `wait` replaces sleeping: it resolves on silence (--idle, default
+        \(KeroAutomationDefaults.idleMilliseconds)ms), on a regular expression
+        (--match), or on the terminal exiting (--exit), and always reports which.
+        Passing --cursor also returns and consumes the new output.
+
+        `exec` runs one command in the terminal's live shell and reports that
+        command's own exit code. It never blocks indefinitely: silent for
+        \(KeroAutomationDefaults.silentMilliseconds)ms, or still running at
+        \(KeroAutomationDefaults.execTimeoutMilliseconds)ms, and it hands back a
+        handle instead. Collect it later with `result`; stop it with
+        `result --interrupt`, which also releases the terminal.
+
+        Output is JSON. --plain prints the text alone, sends notes to stderr,
+        and makes `exec` exit with the command's own status. (`send` spells its
+        payload --text; the presentation flag is --plain everywhere.)
+        """)
+    }
+
     private static func printAgentHelp() {
         print("""
         Usage:
@@ -1034,6 +1715,11 @@ enum KeroAutomationCommandLine {
            the provider integrations Kero can use as lifecycle authorities.
            Both the skill and those integrations link to Kero's app bundle so
            app updates do not leave stale copies installed.
+        8. A provider that reports its conversation id — Claude Code, through
+           the hooks the AI setting installs — lets Kero reopen a pane back
+           into that conversation after a relaunch. The id comes from the
+           provider, never from the screen, and the pane is only resumed when
+           that agent was still the terminal's live foreground process at quit.
         """)
     }
 }

@@ -211,6 +211,24 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// Play a sound with Kero's notifications — an agent finishing or needing
+    /// attention, a terminal bell, a program's own notification request. On by
+    /// default: the point of a background notification is to be noticed, and
+    /// macOS still lets the user silence Kero entirely in System Settings.
+    @Published var notificationSound: Bool {
+        didSet {
+            TerminalNotificationService.shared.isSoundEnabled = notificationSound
+            save()
+        }
+    }
+
+    /// Key equivalents for Kero's window, workspace, tab, and pane commands.
+    /// The menu bar reads this, so a change here retitles the menus as well as
+    /// changing what the keys do.
+    @Published var shortcuts: KeyboardShortcutMap {
+        didSet { save() }
+    }
+
     /// Which emulator drives terminal panes. Only ever holds a backend this
     /// build ships a surface for — see `TerminalBackend` — and a session binds
     /// its backend at creation, so a change here reaches terminals opened
@@ -255,6 +273,8 @@ final class AppSettings: nonisolated ObservableObject {
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
         aiEnabled = toml["ai.enabled"]?.bool ?? false
+        notificationSound = toml["notifications.sound"]?.bool ?? true
+        shortcuts = KeyboardShortcutMap.load(from: toml)
         terminalBackend = TerminalBackend(persisted: toml["terminal.backend"]?.string)
         applyAppearance()
         reloadThemeSelection()
@@ -303,6 +323,8 @@ final class AppSettings: nonisolated ObservableObject {
         macosOptionAsAlt = false
         wrapLines = false
         restoreTerminalHistory = false
+        notificationSound = true
+        shortcuts.resetAll()
         if aiEnabled {
             do {
                 try setAIEnabled(false)
@@ -318,18 +340,22 @@ final class AppSettings: nonisolated ObservableObject {
     func setAIEnabled(_ enabled: Bool) throws {
         if enabled {
             try KeroAgentIntegrations.preflightInstallAvailable()
+            try KeroClaudeIntegration.preflightInstall()
             _ = try KeroAutomationSkill.install(
                 destinations: KeroAutomationSkill.Destination.allCases,
                 force: false
             )
             try KeroAgentIntegrations.installAvailable()
+            try KeroClaudeIntegration.install()
         } else {
             try KeroAgentIntegrations.preflightUninstallManaged()
+            try KeroClaudeIntegration.preflightUninstall()
             _ = try KeroAutomationSkill.uninstall(
                 destinations: KeroAutomationSkill.Destination.allCases,
                 force: false
             )
             try KeroAgentIntegrations.uninstallManaged()
+            try KeroClaudeIntegration.uninstall()
         }
         aiEnabled = enabled
     }
@@ -345,6 +371,7 @@ final class AppSettings: nonisolated ObservableObject {
                 force: false
             )
             try KeroAgentIntegrations.installAvailable()
+            try KeroClaudeIntegration.install()
         } catch {
             NSLog("kero: failed to refresh AI support: \(error)")
         }
@@ -388,9 +415,13 @@ final class AppSettings: nonisolated ObservableObject {
         if aiEnabled {
             lines.append("ai.enabled = true")
         }
+        if !notificationSound {
+            lines.append("notifications.sound = false")
+        }
         if terminalBackend != .fallback {
             lines.append("terminal.backend = \(TOML.quote(terminalBackend.rawValue))")
         }
+        lines.append(contentsOf: shortcuts.configLines)
         let dir = Self.configURL.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(

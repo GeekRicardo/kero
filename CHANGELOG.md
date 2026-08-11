@@ -16,6 +16,10 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- Reopen Kero into the Claude Code conversation each tab was holding: a pane running Claude Code comes back resumed in the same directory, `/rename` inside Claude Code renames its Kero tab, and finished or blocked turns raise a notification you can silence with the new sound setting
+- Customize keyboard shortcuts in Settings: every window, workspace, tab, pane, and view command is rebindable, including which modifier the 1–9 keys use for workspaces and for tabs, with conflicts called out and one-click restore
+- Drive Kero terminals from an agent with `kero +term`: create and close panes, send text and control keys, read new output or scrollback by line number, wait for silence or a pattern instead of sleeping, and run a command for its own exit code without ever blocking indefinitely
+
 ## [0.1.45]
 
 - Automate project-scoped panes and coding agents from Kero terminals with guarded `+pane` and `+agent` commands, one-click AI setup, semantic status badges, completion notifications, and attention navigation

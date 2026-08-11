@@ -53,6 +53,19 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     var terminalIsAtLiveBottom = true
     let agentObservation = KeroAgentObservationState()
 
+    /// Line log behind the automation read, wait, and exec commands. It stays
+    /// empty and costs nothing until a client actually watches this terminal.
+    let transcript = KeroTerminalTranscript()
+    /// The one instrumented command this terminal is currently tracking.
+    let shellCommand = KeroAutomationShellCommand()
+    /// Short project-local name an automation client can target instead of a
+    /// UUID. Independent of the agent alias: a plain shell has no agent.
+    var automationAlias: String?
+    /// The agent conversation running in this terminal, as reported by that
+    /// provider's own lifecycle hook. Kero never infers it from the screen —
+    /// a wrong id would resume someone else's conversation.
+    var agentProviderSessionID: String?
+
     init(
         initialDirectory: String? = nil,
         restoredHistory: String? = nil,

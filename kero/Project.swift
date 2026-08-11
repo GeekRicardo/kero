@@ -327,6 +327,21 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         return (tab, pane, session)
     }
 
+    /// Creates a terminal in a new tab for the local automation API. Unlike
+    /// `newSession`, selection only follows when the caller asks for it: a
+    /// background worker must not pull the user off what they were doing.
+    func automationNewTerminalTab(
+        directory: String?,
+        focus: Bool
+    ) -> (tab: PaneTab, pane: Pane, session: TerminalSession)? {
+        let session = makeSession(directory: directory)
+        let tab = makeTab(content: .session(session))
+        insertNextToSelected(tab)
+        if focus { selectedTabID = tab.id }
+        guard let pane = tab.allPanes.first else { return nil }
+        return (tab, pane, session)
+    }
+
     func focusLeft() { selectedTab?.focusLeft() }
     func focusRight() { selectedTab?.focusRight() }
     func focusUp() { selectedTab?.focusUp() }
@@ -816,7 +831,9 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         case .pane(let pane):
             let restoredHistory = pane.historyKey.flatMap { histories[$0] }
             return .pane(Pane(content: makeContent(
-                from: pane.content, restoredHistory: restoredHistory
+                from: pane.content,
+                restoredHistory: restoredHistory,
+                resumeCommand: pane.resumeCommand
             )))
         case .split(let axis, let fraction, let first, let second):
             return .split(PaneSplit(
@@ -830,11 +847,18 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
 
     private func makeContent(
         from snap: SessionSnapshot.ProjectSnapshot.PaneContentSnapshot,
-        restoredHistory: String? = nil
+        restoredHistory: String? = nil,
+        resumeCommand: String? = nil
     ) -> PaneContent {
         switch snap {
         case .session(let workingDirectory):
-            return .session(makeSession(directory: workingDirectory, restoredHistory: restoredHistory))
+            let session = makeSession(
+                directory: workingDirectory, restoredHistory: restoredHistory
+            )
+            if let resumeCommand {
+                session.scheduleAgentResume(resumeCommand)
+            }
+            return .session(session)
         case .file(let path, let editorState):
             let file = FileTab(path: path)
             if let editorState { file.editorState = editorState }

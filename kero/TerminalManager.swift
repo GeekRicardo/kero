@@ -937,18 +937,22 @@ final class TerminalManager: nonisolated ObservableObject {
         switch layout {
         case .pane(let pane):
             var historyKey: String?
-            if case .session(let session) = pane.content,
-               let history = session.serializedHistory(
-                   captureLive: captureTerminalHistory
-               ), !history.isEmpty {
-                let key = UUID().uuidString
-                histories[key] = history
-                historyKey = key
+            var resumeCommand: String?
+            if case .session(let session) = pane.content {
+                if let history = session.serializedHistory(
+                    captureLive: captureTerminalHistory
+                ), !history.isEmpty {
+                    let key = UUID().uuidString
+                    histories[key] = history
+                    historyKey = key
+                }
+                resumeCommand = session.agentResumeCommand
             }
             return .pane(ProjectSnapshot.PaneSnapshot(
                 content: contentSnapshot(pane.content),
                 weight: 1,
-                historyKey: historyKey
+                historyKey: historyKey,
+                resumeCommand: resumeCommand
             ))
         case .split(let split):
             return .split(

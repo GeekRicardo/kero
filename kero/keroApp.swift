@@ -66,6 +66,10 @@ private struct WindowRootView: View {
 private struct KeroCommands: Commands {
     @FocusedObject private var manager: TerminalManager?
     @Environment(\.openWindow) private var openWindow
+    /// Observed so rebinding a shortcut in Settings rebuilds these menus:
+    /// `keroShortcut` reads the map, and a menu that kept a stale key
+    /// equivalent would disagree with what the keyboard actually does.
+    @ObservedObject private var settings = AppSettings.shared
 
     var body: some Commands {
         let _ = TerminalManager.registerWindowOpener {
@@ -76,24 +80,25 @@ private struct KeroCommands: Commands {
             Button("New Project") {
                 manager?.newProject()
             }
-            .keyboardShortcut("n", modifiers: .command)
+            .keroShortcut(.newProject, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Button("New Session") {
                 manager?.newSession()
             }
-            .keyboardShortcut("t", modifiers: .command)
+            .keroShortcut(.newSession, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Button("New Browser Tab") {
                 manager?.newBrowserTab()
             }
+            .keroShortcut(.newBrowserTab, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Button("New Window") {
                 openWindow(id: "main")
             }
-            .keyboardShortcut("n", modifiers: [.command, .shift])
+            .keroShortcut(.newWindow, in: settings.shortcuts)
 
             Button("Close Pane") {
                 // Cmd-W is app-wide: close a pane only when a main window with
@@ -107,14 +112,14 @@ private struct KeroCommands: Commands {
                     NSApp.keyWindow?.performClose(nil)
                 }
             }
-            .keyboardShortcut("w", modifiers: .command)
+            .keroShortcut(.closePane, in: settings.shortcuts)
         }
 
         CommandGroup(replacing: .saveItem) {
             Button("Save") {
                 manager?.saveSelectedFile()
             }
-            .keyboardShortcut("s", modifiers: .command)
+            .keroShortcut(.saveFile, in: settings.shortcuts)
             .disabled(manager == nil)
         }
 
@@ -129,19 +134,19 @@ private struct KeroCommands: Commands {
                 Button("Find…") {
                     manager?.performFindAction(.show)
                 }
-                .keyboardShortcut("f", modifiers: .command)
+                .keroShortcut(.find, in: settings.shortcuts)
                 .disabled(manager?.canFind != true)
 
                 Button("Find and Replace…") {
                     manager?.performFindAction(.replace)
                 }
-                .keyboardShortcut("f", modifiers: [.command, .option])
+                .keroShortcut(.findAndReplace, in: settings.shortcuts)
                 .disabled(manager?.canReplace != true)
 
                 Button("Find Next") {
                     manager?.performFindAction(.next)
                 }
-                .keyboardShortcut("g", modifiers: .command)
+                .keroShortcut(.findNext, in: settings.shortcuts)
                 .disabled(manager?.canFind != true)
 
                 Button("Find Previous") {
@@ -152,7 +157,7 @@ private struct KeroCommands: Commands {
                 Button("Use Selection for Find") {
                     manager?.performFindAction(.useSelection)
                 }
-                .keyboardShortcut("e", modifiers: .command)
+                .keroShortcut(.useSelectionForFind, in: settings.shortcuts)
                 .disabled(manager?.canFind != true)
             }
 
@@ -161,7 +166,7 @@ private struct KeroCommands: Commands {
             Button("Clear Terminal") {
                 manager?.clearActiveTerminal()
             }
-            .keyboardShortcut("k", modifiers: .command)
+            .keroShortcut(.clearTerminal, in: settings.shortcuts)
             .disabled(manager?.canClearActiveTerminal != true)
         }
 
@@ -172,7 +177,7 @@ private struct KeroCommands: Commands {
             Button("Command Palette…") {
                 manager?.toggleCommandPalette()
             }
-            .keyboardShortcut("p", modifiers: .command)
+            .keroShortcut(.commandPalette, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Divider()
@@ -180,31 +185,31 @@ private struct KeroCommands: Commands {
             Button("Toggle Left Sidebar") {
                 manager?.toggleLeftSidebar()
             }
-            .keyboardShortcut("b", modifiers: .command)
+            .keroShortcut(.toggleLeftSidebar, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Button("Toggle Right Sidebar") {
                 manager?.toggleSidebar()
             }
-            .keyboardShortcut("b", modifiers: [.command, .shift])
+            .keroShortcut(.toggleRightSidebar, in: settings.shortcuts)
             .disabled(manager?.selectedProject == nil)
 
             Button("Toggle Files Panel") {
                 manager?.togglePanel(.files)
             }
-            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .keroShortcut(.toggleFilesPanel, in: settings.shortcuts)
             .disabled(manager?.selectedProject == nil)
 
             Button("Toggle Git Panel") {
                 manager?.togglePanel(.git)
             }
-            .keyboardShortcut("g", modifiers: [.command, .shift])
+            .keroShortcut(.toggleGitPanel, in: settings.shortcuts)
             .disabled(manager?.selectedProject == nil)
 
             Button("Toggle Info Panel") {
                 manager?.togglePanel(.info)
             }
-            .keyboardShortcut("i", modifiers: [.command, .shift])
+            .keroShortcut(.toggleInfoPanel, in: settings.shortcuts)
             .disabled(manager?.selectedProject == nil)
         }
 
@@ -212,13 +217,13 @@ private struct KeroCommands: Commands {
             Button("Next Project") {
                 manager?.selectNextProject()
             }
-            .keyboardShortcut("]", modifiers: [.command, .option])
+            .keroShortcut(.nextProject, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Button("Previous Project") {
                 manager?.selectPreviousProject()
             }
-            .keyboardShortcut("[", modifiers: [.command, .option])
+            .keroShortcut(.previousProject, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Divider()
@@ -227,7 +232,7 @@ private struct KeroCommands: Commands {
                 Button(project.name) {
                     manager?.selectProject(index: index)
                 }
-                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+                .keroNumberShortcut(.selectWorkspaceNumber, index: index, in: settings.shortcuts)
             }
         }
 
@@ -235,13 +240,13 @@ private struct KeroCommands: Commands {
             Button("Focus Address Bar") {
                 manager?.focusBrowserAddressBar()
             }
-            .keyboardShortcut("l", modifiers: .command)
+            .keroShortcut(.focusAddressBar, in: settings.shortcuts)
             .disabled(manager?.hasSelectedBrowser != true)
 
             Button("Reload Page") {
                 manager?.reloadSelectedBrowser()
             }
-            .keyboardShortcut("r", modifiers: .command)
+            .keroShortcut(.reloadPage, in: settings.shortcuts)
             .disabled(manager?.hasSelectedBrowser != true)
 
             Button("Stop Loading") {
@@ -261,7 +266,7 @@ private struct KeroCommands: Commands {
             Button("Next Agent Needing Attention") {
                 manager?.focusNextAgentAttention()
             }
-            .keyboardShortcut("a", modifiers: [.command, .shift])
+            .keroShortcut(.nextAgentAttention, in: settings.shortcuts)
             .disabled(manager?.hasAgentAttention != true)
         }
 
@@ -269,23 +274,25 @@ private struct KeroCommands: Commands {
             Button("Split Right") {
                 manager?.splitRight()
             }
-            .keyboardShortcut("d", modifiers: .command)
+            .keroShortcut(.splitRight, in: settings.shortcuts)
             .disabled(manager?.canSplit != true)
 
             Button("Split Down") {
                 manager?.splitDown()
             }
-            .keyboardShortcut("d", modifiers: [.command, .shift])
+            .keroShortcut(.splitDown, in: settings.shortcuts)
             .disabled(manager?.canSplit != true)
 
             Button("Split Left") {
                 manager?.splitLeft()
             }
+            .keroShortcut(.splitLeft, in: settings.shortcuts)
             .disabled(manager?.canSplit != true)
 
             Button("Split Up") {
                 manager?.splitUp()
             }
+            .keroShortcut(.splitUp, in: settings.shortcuts)
             .disabled(manager?.canSplit != true)
 
             Divider()
@@ -293,37 +300,37 @@ private struct KeroCommands: Commands {
             Button("Focus Pane Left") {
                 manager?.focusPaneLeft()
             }
-            .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+            .keroShortcut(.focusPaneLeft, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Button("Focus Pane Right") {
                 manager?.focusPaneRight()
             }
-            .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            .keroShortcut(.focusPaneRight, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Button("Focus Pane Up") {
                 manager?.focusPaneUp()
             }
-            .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+            .keroShortcut(.focusPaneUp, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Button("Focus Pane Down") {
                 manager?.focusPaneDown()
             }
-            .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+            .keroShortcut(.focusPaneDown, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Button("Focus Previous Pane") {
                 manager?.focusPreviousPane()
             }
-            .keyboardShortcut("[", modifiers: .command)
+            .keroShortcut(.focusPreviousPane, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Button("Focus Next Pane") {
                 manager?.focusNextPane()
             }
-            .keyboardShortcut("]", modifiers: .command)
+            .keroShortcut(.focusNextPane, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Divider()
@@ -331,38 +338,38 @@ private struct KeroCommands: Commands {
             Button("Toggle Pane Zoom") {
                 manager?.togglePaneZoom()
             }
-            .keyboardShortcut(.return, modifiers: [.command, .shift])
+            .keroShortcut(.togglePaneZoom, in: settings.shortcuts)
             .disabled(manager?.hasSplitPanes != true)
 
             Button("Equalize Panes") {
                 manager?.equalizePanes()
             }
-            .keyboardShortcut("=", modifiers: [.command, .control])
+            .keroShortcut(.equalizePanes, in: settings.shortcuts)
             .disabled(manager?.hasSplitPanes != true)
 
             Menu("Resize Pane") {
                 Button("Up") {
                     manager?.resizePaneUp()
                 }
-                .keyboardShortcut(.upArrow, modifiers: [.command, .control])
+                .keroShortcut(.resizePaneUp, in: settings.shortcuts)
                 .disabled(manager?.hasSplitPanes != true)
 
                 Button("Down") {
                     manager?.resizePaneDown()
                 }
-                .keyboardShortcut(.downArrow, modifiers: [.command, .control])
+                .keroShortcut(.resizePaneDown, in: settings.shortcuts)
                 .disabled(manager?.hasSplitPanes != true)
 
                 Button("Left") {
                     manager?.resizePaneLeft()
                 }
-                .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
+                .keroShortcut(.resizePaneLeft, in: settings.shortcuts)
                 .disabled(manager?.hasSplitPanes != true)
 
                 Button("Right") {
                     manager?.resizePaneRight()
                 }
-                .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
+                .keroShortcut(.resizePaneRight, in: settings.shortcuts)
                 .disabled(manager?.hasSplitPanes != true)
             }
 
@@ -371,13 +378,13 @@ private struct KeroCommands: Commands {
             Button("Next Tab") {
                 manager?.selectNextTab()
             }
-            .keyboardShortcut("]", modifiers: [.command, .shift])
+            .keroShortcut(.nextTab, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Button("Previous Tab") {
                 manager?.selectPreviousTab()
             }
-            .keyboardShortcut("[", modifiers: [.command, .shift])
+            .keroShortcut(.previousTab, in: settings.shortcuts)
             .disabled(manager == nil)
 
             Divider()
@@ -386,7 +393,7 @@ private struct KeroCommands: Commands {
                 Button(tab.displayTitle ?? String(localized: "Tab \(index + 1)")) {
                     manager?.selectTab(index: index)
                 }
-                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control)
+                .keroNumberShortcut(.selectTabNumber, index: index, in: settings.shortcuts)
             }
         }
     }

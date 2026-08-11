@@ -36,6 +36,39 @@ Use these exact values with `kero +agent start --kind`:
 - `amp` — Amp
 - `pi` — Pi
 
+## Drive a terminal
+
+`kero +term` operates the terminal itself: panes, input, output, and exit codes.
+Use it for shells, builds, and interactive programs; use `kero +agent` for
+recognized coding agents.
+
+```sh
+kero +term new --alias build --cwd "$PWD"    # a pane of your own, unfocused
+kero +term exec build 'npm test'             # its own output and exit code
+kero +term history build                     # last 100 lines; --lines for more
+kero +term read build --cursor agent         # only what is new since last read
+kero +term wait build --idle 800             # instead of sleeping
+kero +term send build --key ctrl-c           # control keys by name
+```
+
+Four things worth knowing before the first call:
+
+1. `history` defaults to the last 100 lines and `read` caps at 500; both report
+   what they left out and stay reachable by absolute line number.
+2. `wait` always returns why it stopped — `idle`, `match`, `exit`, or `timeout`.
+   A timeout is an outcome, not an error.
+3. `exec` never blocks indefinitely. A quiet or long command becomes a
+   background handle; collect it with `kero +term result`, or stop it with
+   `kero +term result --interrupt`. An interrupted command's exit code is gone
+   for good, so interrupting and abandoning are the same operation.
+4. `exec` needs a shell at a prompt, and the invoking pane's shell is busy
+   running `kero`. Create a pane first.
+
+Run `kero +term --help` for the complete contract.
+
+`kero +tab rename NAME` renames the tab the command runs in — and only that one
+— so a long task does not leave the user with a strip of identical tabs.
+
 ## Coordinate existing Kero agents
 
 When a task involves an agent already running in another Kero pane, coordinate

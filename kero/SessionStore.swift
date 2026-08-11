@@ -38,6 +38,12 @@ struct SessionSnapshot: Codable {
             /// nil for files, browsers, diffs, or when history restore is off.
             /// Optional so snapshots written before this feature still decode.
             var historyKey: String?
+            /// Command that puts a coding agent back in the conversation this
+            /// pane was holding — set only when a resumable agent was actually
+            /// running here at capture time. Replayed into the restored shell
+            /// so relaunching Kero does not abandon the agent's context.
+            /// Optional so older snapshots still decode.
+            var resumeCommand: String?
         }
 
         struct ColumnSnapshot: Codable {

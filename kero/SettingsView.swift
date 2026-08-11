@@ -208,6 +208,14 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Keyboard") {
+                KeyboardShortcutsSettingsSection(
+                    map: settings.shortcuts,
+                    onChange: { settings.shortcuts = $0 }
+                )
+                .frame(minHeight: 372)
+            }
+
             Section("Text Editing") {
                 Toggle("Wrap lines to editor width", isOn: $settings.wrapLines)
             }
@@ -218,6 +226,17 @@ struct SettingsView: View {
                     onChange: { try settings.setAIEnabled($0) }
                 )
                 .frame(minHeight: 44)
+
+                DescribedSettingsRow(
+                    "Play a sound with notifications",
+                    description: "Sounds an alert when an agent finishes, needs attention, or a terminal notifies"
+                ) {
+                    Toggle(
+                        "Play a sound with notifications",
+                        isOn: $settings.notificationSound
+                    )
+                    .labelsHidden()
+                }
             }
 
             Section("Updates") {
@@ -251,6 +270,8 @@ struct SettingsView: View {
                         && !settings.wrapLines
                         && !settings.restoreTerminalHistory
                         && !settings.aiEnabled
+                        && settings.notificationSound
+                        && !settings.shortcuts.hasCustomBindings
                         && settings.terminalBackend == .fallback)
                 }
             }
