@@ -888,7 +888,8 @@ enum KeroAutomationCommandLine {
         }
 
         guard phase != "session",
-              let reported = KeroAgentPhase(rawValue: phase) else { return }
+              let reported = KeroAgentPhase(rawValue: phase),
+              !isIdleReminder(reported, event: event) else { return }
         _ = try? connection.automationRequest(
             method: "agent.report",
             params: [
@@ -897,6 +898,26 @@ enum KeroAutomationCommandLine {
             ],
             timeout: 1
         )
+    }
+
+    /// Claude Code's `Notification` hook covers two unrelated things: a tool
+    /// call waiting for approval, and a nag that the user has not typed
+    /// anything for a minute. Only the first is a blocker.
+    ///
+    /// Without this, an agent the user had already looked at re-announced
+    /// itself every time they glanced away — the nag fires on a timer, so
+    /// acknowledging it just started the clock again.
+    private static func isIdleReminder(
+        _ phase: KeroAgentPhase,
+        event: [String: KeroJSONValue]?
+    ) -> Bool {
+        guard phase == .blocked,
+              let message = event?["message"]?.stringValue?.lowercased()
+        else { return false }
+        // Match the waiting-for-input wording only. An unrecognized message is
+        // still reported: missing a real approval prompt is the worse failure.
+        return message.contains("waiting for your input")
+            || message.contains("waiting for input")
     }
 
     private static func readIntegrationEvent() -> [String: KeroJSONValue]? {
