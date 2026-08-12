@@ -383,6 +383,28 @@ final class TerminalMetalRenderer {
         let top = originY + Float(row) * cellHeight
         var column = 0
 
+        // Whether this row is a single background colour from edge to edge.
+        //
+        // Only such a row may bleed into the padding above or below it. A
+        // full-screen program paints its frame that way, and stopping its
+        // background at the first text row would leave a strip of some other
+        // colour along the window edge. A prompt is the opposite case: its
+        // segments are individually coloured, and extending each one upward
+        // made the first line of every new terminal look taller than the rest.
+        var isUniformRow = true
+        if columns > 0 {
+            let first = AlacrittyRenderer.background(
+                of: cells[row * columns], default: defaultBackground
+            )
+            for index in 1..<columns
+            where AlacrittyRenderer.background(
+                of: cells[row * columns + index], default: defaultBackground
+            ) != first {
+                isUniformRow = false
+                break
+            }
+        }
+
         // Backgrounds first, coalescing equal-coloured runs into one quad.
         while column < columns {
             let cell = cells[row * columns + column]
@@ -397,8 +419,8 @@ final class TerminalMetalRenderer {
             if background != defaultBackground {
                 let reachesLeftEdge = column == 0
                 let reachesRightEdge = column + span == columns
-                let reachesTopEdge = row == 0
-                let reachesBottomEdge = row + 1 == snapshot.rows
+                let reachesTopEdge = row == 0 && isUniformRow
+                let reachesBottomEdge = row + 1 == snapshot.rows && isUniformRow
                 let left = reachesLeftEdge
                     ? 0 : originX + Float(column) * cellWidth
                 let right = reachesRightEdge
