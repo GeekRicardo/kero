@@ -91,6 +91,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     private static let sharedDevice = MTLCreateSystemDefaultDevice()
     private let metalDevice = AlacrittyTerminalView.sharedDevice
     private var renderScheduled = false
+    private var renderRetryScheduled = false
     /// Forces the next frame regardless of emulator damage. Set for changes
     /// the emulator knows nothing about — a resize, a new theme or font, a
     /// selection drag, focus — since those move pixels without touching a cell.
@@ -547,6 +548,28 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         }
     }
 
+    /// Re-attempts a frame this view still owes.
+    ///
+    /// Only when one is actually owed: a pane hidden behind its presentation
+    /// cover, or a pending host-side change the emulator never reported as
+    /// damage. An ordinary skipped frame is left alone — the next wakeup
+    /// covers it, and retrying those would turn every idle terminal into a
+    /// timer.
+    private func retryRenderIfOwed() {
+        guard isSurfaceVisible,
+              isAwaitingVisibleFrame || needsUnconditionalRedraw,
+              !renderRetryScheduled
+        else { return }
+        renderRetryScheduled = true
+        // Roughly a frame later: long enough for a synchronized update to
+        // close or a drawable to come back, short enough to be invisible.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
+            guard let self else { return }
+            self.renderRetryScheduled = false
+            self.scheduleRender(force: true)
+        }
+    }
+
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         // A move between displays changes the backing scale, which invalidates
@@ -565,6 +588,14 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         // Full-screen TUIs use DEC mode 2026 to replace a frame atomically.
         // A host cursor tick must not expose the cleared intermediate grid.
         if !waitUntilCompleted, kero_alacritty_synchronized_update(handle) {
+            // Retry rather than simply drop the frame. Rendering is driven by
+            // PTY wakeups, and a program that has just finished painting its
+            // first screen goes quiet — so a frame skipped here is not
+            // followed by another until something else arrives. With a
+            // presentation cover up, that leaves the pane blank over a screen
+            // that is already complete, until a keystroke happens to produce
+            // more output.
+            retryRenderIfOwed()
             return true
         }
         revalidateURLHoverForRender()
@@ -607,7 +638,12 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         metalLayer.drawableSize = CGSize(
             width: size.width * scale, height: size.height * scale
         )
-        guard let drawable = metalLayer.nextDrawable() else { return false }
+        guard let drawable = metalLayer.nextDrawable() else {
+            // The pool is momentarily empty. Same reasoning as the
+            // synchronized-update skip: nothing else guarantees another try.
+            retryRenderIfOwed()
+            return false
+        }
         // Keep the IOSurface before render schedules this drawable for
         // presentation. Accessing drawable.texture afterward is invalid.
         let drawableSurface = drawable.texture.iosurface
