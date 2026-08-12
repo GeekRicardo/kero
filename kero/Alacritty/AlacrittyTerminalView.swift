@@ -92,6 +92,9 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     private let metalDevice = AlacrittyTerminalView.sharedDevice
     private var renderScheduled = false
     private var renderRetryScheduled = false
+    /// Recovery timer for a pane still hidden behind its presentation cover.
+    private var coverWatchdog: Timer?
+    private var coverWatchdogAttempts = 0
     /// Forces the next frame regardless of emulator damage. Set for changes
     /// the emulator knows nothing about — a resize, a new theme or font, a
     /// selection drag, focus — since those move pixels without touching a cell.
@@ -357,6 +360,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         directoryTimer = nil
         cursorTimer?.invalidate()
         cursorTimer = nil
+        stopCoverWatchdog()
         isPointerInside = false
         isCommandPressed = false
         stopModifierMonitor()
@@ -392,6 +396,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             // Animation releases that drawable and its pool. A 1800×1600
             // BGRA drawable is ~11.5 MiB, so one per parked tab dominates
             // multi-tab memory.
+            stopCoverWatchdog()
             presentationCoverLayer.removeFromSuperlayer()
             let parkedLayer = CALayer()
             parkedLayer.isOpaque = true
@@ -800,6 +805,52 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         CATransaction.setDisableActions(true)
         presentationCoverLayer.isHidden = !visible
         CATransaction.commit()
+        if visible { startCoverWatchdog() } else { stopCoverWatchdog() }
+    }
+
+    /// Keeps asking for a frame for as long as the presentation cover is up.
+    ///
+    /// Drawing is driven by PTY wakeups, and several paths can drop the very
+    /// frame that would have taken the cover down: a synchronized update in
+    /// progress, an empty drawable pool, or a presentation callback discarded
+    /// because a layout pass bumped `presentationGeneration` while the command
+    /// buffer was in flight. A full-screen program that has finished painting
+    /// then sends nothing more, so no second wakeup arrives to recover on, and
+    /// the pane sits blank over a screen that is already complete until a
+    /// keystroke happens to produce output.
+    ///
+    /// Chasing each of those paths individually is how this bug survived; a
+    /// cover that is still up is the one condition that means "the user is
+    /// looking at nothing", so recover from that directly. Bounded on purpose:
+    /// this is a recovery path, not a frame clock. It stops the moment a frame
+    /// lands, and gives up rather than spin behind a pane that will never draw.
+    private func startCoverWatchdog() {
+        guard coverWatchdog == nil else { return }
+        coverWatchdogAttempts = 0
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            assumeMainActor {
+                self.coverWatchdogAttempts += 1
+                guard self.isSurfaceVisible,
+                      self.isAwaitingVisibleFrame,
+                      self.coverWatchdogAttempts <= 40
+                else {
+                    self.stopCoverWatchdog()
+                    return
+                }
+                self.scheduleRender(force: true)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        coverWatchdog = timer
+    }
+
+    private func stopCoverWatchdog() {
+        coverWatchdog?.invalidate()
+        coverWatchdog = nil
     }
 
     private func updateMarkedTextOverlay(snapshot: KeroSnapshot) {
