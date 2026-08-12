@@ -2010,7 +2010,17 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             switch result {
             case .success(let remotePath):
                 self.dismissTransferOverlay()
-                self.write(Array(Self.shellToken(for: remotePath).utf8))
+                // Delivered as a paste, not as typing. A program that accepts
+                // dropped images — Claude Code turns one into an `[Image #N]`
+                // attachment — recognizes them by the bracketed-paste markers
+                // around the path. Typed character by character, the same path
+                // is just text in the prompt.
+                self.write(
+                    AlacrittyKeyMap.paste(
+                        Self.shellToken(for: remotePath),
+                        mode: self.terminalMode
+                    )
+                )
             case .failure(.cancelled):
                 self.dismissTransferOverlay()
             case .failure(let failure):
