@@ -5,7 +5,7 @@
 
 import Foundation
 
-/// Claude Code's lifecycle hooks and Kero's `/rename` command.
+/// Claude Code's lifecycle hooks.
 ///
 /// The other providers Kero integrates with read a drop-in file, so
 /// `KeroAgentIntegrations` can manage them as a symlink into the app bundle.
@@ -74,39 +74,23 @@ enum KeroClaudeIntegration {
             .appendingPathComponent("settings.json", isDirectory: false)
     }
 
-    private static func renameCommandURL(homeURL: URL) -> URL {
-        configurationRoot(homeURL: homeURL)
-            .appendingPathComponent("commands/rename.md", isDirectory: false)
-    }
-
     // MARK: - Install
 
     /// Checks everything that could fail before anything is written. Claude
     /// Code not being installed is not a failure: enabling AI must never
     /// create provider configuration for a provider the user does not use.
     static func preflightInstall(
-        bundle: Bundle = .main,
         homeURL: URL = FileManager.default.homeDirectoryForCurrentUser
     ) throws {
         guard isDirectory(configurationRoot(homeURL: homeURL)) else { return }
         _ = try loadSettings(homeURL: homeURL)
-        _ = try renameCommandSource(bundle: bundle)
-
-        let command = renameCommandURL(homeURL: homeURL)
-        if itemType(at: command) != nil, !isManagedRenameCommand(command) {
-            throw IntegrationError.message(
-                "\(command.path) already exists and is not managed by Kero. "
-                    + "Rename or remove it, then enable AI again."
-            )
-        }
     }
 
     static func install(
-        bundle: Bundle = .main,
         homeURL: URL = FileManager.default.homeDirectoryForCurrentUser
     ) throws {
         guard isDirectory(configurationRoot(homeURL: homeURL)) else { return }
-        try preflightInstall(bundle: bundle, homeURL: homeURL)
+        try preflightInstall(homeURL: homeURL)
 
         var settings = try loadSettings(homeURL: homeURL)
         var hooks = (settings["hooks"] as? [String: Any]) ?? [:]
@@ -123,7 +107,7 @@ enum KeroClaudeIntegration {
         }
         settings["hooks"] = hooks
         try writeSettings(settings, homeURL: homeURL)
-        try linkRenameCommand(bundle: bundle, homeURL: homeURL)
+        removeRetiredRenameCommand(homeURL: homeURL)
     }
 
     // MARK: - Uninstall
@@ -133,13 +117,6 @@ enum KeroClaudeIntegration {
     ) throws {
         guard isDirectory(configurationRoot(homeURL: homeURL)) else { return }
         _ = try loadSettings(homeURL: homeURL)
-
-        let command = renameCommandURL(homeURL: homeURL)
-        if itemType(at: command) != nil, !isManagedRenameCommand(command) {
-            throw IntegrationError.message(
-                "\(command.path) is not managed by Kero, so Kero will not remove it."
-            )
-        }
     }
 
     static func uninstall(
@@ -168,11 +145,7 @@ enum KeroClaudeIntegration {
             }
             try writeSettings(settings, homeURL: homeURL)
         }
-
-        let command = renameCommandURL(homeURL: homeURL)
-        if itemType(at: command) != nil {
-            try FileManager.default.removeItem(at: command)
-        }
+        removeRetiredRenameCommand(homeURL: homeURL)
     }
 
     // MARK: - settings.json
@@ -223,52 +196,27 @@ enum KeroClaudeIntegration {
         }
     }
 
-    // MARK: - /rename
+    // MARK: - Retired `/rename` command
 
-    private static func renameCommandSource(bundle: Bundle) throws -> URL {
-        for directory in ["AgentIntegrations/claude", "claude", nil] {
-            guard let url = bundle.url(
-                forResource: "rename",
-                withExtension: "md",
-                subdirectory: directory
-            ), let text = try? String(contentsOf: url, encoding: .utf8),
-               text.contains(marker) else { continue }
-            return url.standardizedFileURL
-        }
-        throw IntegrationError.message(
-            "Kero's bundled Claude Code /rename command is missing."
-        )
+    /// Removes the `/rename` command Kero used to install here.
+    ///
+    /// It was a mistake: Claude Code has a built-in `/rename`, and a file of
+    /// the same name in the user's command directory shadowed it. Cleanup runs
+    /// on both install and uninstall so anyone who already has the link is
+    /// repaired by the next toggle, and only ever removes Kero's own link —
+    /// a command the user wrote themselves is left alone.
+    private static func removeRetiredRenameCommand(homeURL: URL) {
+        let url = configurationRoot(homeURL: homeURL)
+            .appendingPathComponent("commands/rename.md", isDirectory: false)
+        guard itemType(at: url) != nil, isRetiredRenameCommand(url) else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 
-    private static func linkRenameCommand(bundle: Bundle, homeURL: URL) throws {
-        let source = try renameCommandSource(bundle: bundle)
-        let destination = renameCommandURL(homeURL: homeURL)
-        if let target = symbolicLinkTarget(at: destination),
-           target.standardizedFileURL.path == source.path {
-            return
-        }
-        let fileManager = FileManager.default
-        try fileManager.createDirectory(
-            at: destination.deletingLastPathComponent(),
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o755]
-        )
-        if itemType(at: destination) != nil {
-            try fileManager.removeItem(at: destination)
-        }
-        try fileManager.createSymbolicLink(
-            atPath: destination.path,
-            withDestinationPath: source.path
-        )
-    }
-
-    private static func isManagedRenameCommand(_ url: URL) -> Bool {
+    private static func isRetiredRenameCommand(_ url: URL) -> Bool {
         if let text = try? String(contentsOf: url, encoding: .utf8),
            text.contains(marker) {
             return true
         }
-        // A moved app leaves the link dangling; recognize Kero's own resource
-        // so launch reconciliation can repair it instead of refusing.
         guard itemType(at: url) == .typeSymbolicLink,
               let target = symbolicLinkTarget(at: url)
         else { return false }
