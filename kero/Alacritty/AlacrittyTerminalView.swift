@@ -108,6 +108,10 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     /// Guards `retryRenderSoon` against spinning behind a surface that never
     /// manages a frame. Reset whenever one reaches the GPU.
     private var consecutiveRenderRetries = 0
+    /// In-flight clipboard-image upload to the host this pane is SSH'd into,
+    /// and the affordance that reports and cancels it.
+    private var remoteUpload: KeroRemoteUpload?
+    private var transferOverlay: KeroTransferOverlayView?
     /// Recovery timer for a pane still hidden behind its presentation cover.
     private var coverWatchdog: Timer?
     private var coverWatchdogAttempts = 0
@@ -377,6 +381,10 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         cursorTimer?.invalidate()
         cursorTimer = nil
         stopCoverWatchdog()
+        // The pane is going away; there is nowhere left to paste the path.
+        remoteUpload?.cancel()
+        remoteUpload = nil
+        dismissTransferOverlay()
         isPointerInside = false
         isCommandPressed = false
         stopModifierMonitor()
@@ -1822,12 +1830,18 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     @objc func paste(_ sender: Any?) {
         let pasteboard = NSPasteboard.general
         guard let text = Self.pasteboardString(from: pasteboard) else {
-            // Image-aware TUIs read the native pasteboard after Ctrl-V. The
-            // renderer may not display their image protocol, but the paste
-            // itself must still reach the app.
-            if pasteboard.canReadObject(forClasses: [NSImage.self], options: nil) {
-                write([0x16])
+            guard KeroClipboardImage.hasImage(pasteboard) else { return }
+            // A program on the far side of an SSH connection cannot read this
+            // Mac's clipboard, so Ctrl-V reaches it and finds nothing. Send
+            // the bytes across and paste the path they landed at instead.
+            if let session = KeroSSHSession.detect(foregroundPID: foregroundPid) {
+                pasteImageOverSSH(session: session, pasteboard: pasteboard)
+                return
             }
+            // Locally, image-aware TUIs read the native pasteboard after
+            // Ctrl-V themselves. The renderer may not display their image
+            // protocol, but the paste itself must still reach the app.
+            write([0x16])
             return
         }
         let submitRisk = text.contains("\n") || text.contains("\r")
@@ -1950,6 +1964,72 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             return path
         }
         return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Uploads the clipboard image to the host this pane is connected to, then
+    /// types the path it landed at.
+    ///
+    /// Nothing is typed until the upload succeeds: a path that does not exist
+    /// yet is worse than no paste at all, because the program on the far side
+    /// will read it, fail, and say something confusing about the file.
+    private func pasteImageOverSSH(
+        session: KeroSSHSession,
+        pasteboard: NSPasteboard
+    ) {
+        guard remoteUpload == nil else { return }
+        guard let image = KeroClipboardImage.pngData(from: pasteboard) else {
+            presentTransferFailure(
+                KeroRemoteUpload.Failure.unreadableClipboard.localizedDescription
+            )
+            return
+        }
+
+        let upload = KeroRemoteUpload()
+        remoteUpload = upload
+        let overlay = transferOverlay ?? KeroTransferOverlayView(frame: .zero)
+        transferOverlay = overlay
+        overlay.onCancel = { [weak self] in
+            self?.remoteUpload?.cancel()
+            self?.dismissTransferOverlay()
+        }
+        overlay.present(
+            in: self,
+            message: String(
+                localized: "Uploading image to \(session.destination)…",
+                comment: "Shown while an image paste is copied to the SSH host."
+            )
+        )
+
+        upload.start(
+            session: session,
+            imageData: image.data,
+            fileExtension: image.fileExtension
+        ) { [weak self] result in
+            guard let self else { return }
+            self.remoteUpload = nil
+            switch result {
+            case .success(let remotePath):
+                self.dismissTransferOverlay()
+                self.write(Array(Self.shellToken(for: remotePath).utf8))
+            case .failure(.cancelled):
+                self.dismissTransferOverlay()
+            case .failure(let failure):
+                self.presentTransferFailure(failure.localizedDescription)
+            }
+        }
+    }
+
+    private func presentTransferFailure(_ message: String) {
+        let overlay = transferOverlay ?? KeroTransferOverlayView(frame: .zero)
+        transferOverlay = overlay
+        overlay.onCancel = { [weak self] in self?.dismissTransferOverlay() }
+        overlay.present(in: self, message: message)
+        overlay.showFailure(message)
+    }
+
+    private func dismissTransferOverlay() {
+        transferOverlay?.dismiss()
+        transferOverlay = nil
     }
 
     private static func pasteboardString(from pasteboard: NSPasteboard) -> String? {

@@ -16,6 +16,8 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- Paste an image into a program running over SSH: Kero uploads it to that host using the connection you are already on, then pastes the path it landed at, with a cancel control while it works
+
 - Reopen Kero into the Claude Code conversation each tab was holding: a pane running Claude Code comes back resumed in the same directory, and finished or blocked turns raise a notification you can silence with the new sound setting
 - Customize keyboard shortcuts in Settings: every window, workspace, tab, pane, and view command is rebindable, including which modifier the 1–9 keys use for workspaces and for tabs, with conflicts called out and one-click restore. Hold a shortcut's modifiers to reveal the matching key on each workspace and tab
 - Turn copy on select off in Settings; it stays on by default
