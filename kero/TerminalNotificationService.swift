@@ -20,7 +20,7 @@ final class TerminalNotificationService: NSObject, UNUserNotificationCenterDeleg
     private let center = UNUserNotificationCenter.current()
     private let authorizationOptions: UNAuthorizationOptions = [.alert, .sound]
     private var isRequestingAuthorization = false
-    private var pending: (message: String, sessionID: UUID?)?
+    private var pending: (message: String, title: String?, sessionID: UUID?)?
 
     /// Mirrors the "Play a sound" setting. Held here rather than read from
     /// `AppSettings` at delivery time because delivery happens inside
@@ -41,19 +41,25 @@ final class TerminalNotificationService: NSObject, UNUserNotificationCenterDeleg
         }
     }
 
-    func post(message: String, sessionID: UUID? = nil) {
+    /// `title` names what raised this — for an agent, the title its own UI is
+    /// showing, which is how the user recognizes which of several panes it is.
+    /// Falls back to Kero when a terminal has nothing useful to say.
+    func post(message: String, title: String? = nil, sessionID: UUID? = nil) {
         guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
-            self?.checkAuthorization(for: message, sessionID: sessionID)
+            self?.checkAuthorization(for: message, title: title, sessionID: sessionID)
         }
     }
 
-    private func checkAuthorization(for message: String, sessionID: UUID?) {
+    private func checkAuthorization(
+        for message: String, title: String?, sessionID: UUID?
+    ) {
         center.getNotificationSettings { [weak self] settings in
             DispatchQueue.main.async {
                 self?.handle(
                     settings,
                     message: message,
+                    title: title,
                     sessionID: sessionID
                 )
             }
@@ -63,21 +69,22 @@ final class TerminalNotificationService: NSObject, UNUserNotificationCenterDeleg
     private func handle(
         _ settings: UNNotificationSettings,
         message: String,
+        title: String?,
         sessionID: UUID?
     ) {
         switch settings.authorizationStatus {
         case .authorized, .provisional:
             if settings.soundSetting == .notSupported {
                 // Authorized without sound — upgrade options before delivering.
-                requestAuthorization(message: message, sessionID: sessionID)
+                requestAuthorization(message: message, title: title, sessionID: sessionID)
             } else {
-                deliver(message, sessionID: sessionID)
+                deliver(message, title: title, sessionID: sessionID)
             }
         case .notDetermined:
             // A terminal can emit OSC 9 repeatedly while the permission sheet
             // is open. Keep only the latest request so an untrusted process
             // cannot grow an unbounded queue or release a banner storm.
-            requestAuthorization(message: message, sessionID: sessionID)
+            requestAuthorization(message: message, title: title, sessionID: sessionID)
         case .denied:
             break
         @unknown default:
@@ -92,15 +99,17 @@ final class TerminalNotificationService: NSObject, UNUserNotificationCenterDeleg
         switch settings.authorizationStatus {
         case .authorized, .provisional:
             guard settings.soundSetting == .notSupported else { return }
-            requestAuthorization(message: nil, sessionID: nil)
+            requestAuthorization(message: nil, title: nil, sessionID: nil)
         default:
             break
         }
     }
 
-    private func requestAuthorization(message: String?, sessionID: UUID?) {
+    private func requestAuthorization(
+        message: String?, title: String?, sessionID: UUID?
+    ) {
         if let message {
-            pending = (message, sessionID)
+            pending = (message, title, sessionID)
         }
         guard !isRequestingAuthorization else { return }
 
@@ -117,15 +126,20 @@ final class TerminalNotificationService: NSObject, UNUserNotificationCenterDeleg
                     NSLog("Kero: notification authorization failed: %@", String(describing: error))
                 }
                 if granted, let pending {
-                    self.deliver(pending.message, sessionID: pending.sessionID)
+                    self.deliver(
+                        pending.message,
+                        title: pending.title,
+                        sessionID: pending.sessionID
+                    )
                 }
             }
         }
     }
 
-    private func deliver(_ message: String, sessionID: UUID?) {
+    private func deliver(_ message: String, title: String?, sessionID: UUID?) {
         let content = UNMutableNotificationContent()
-        content.title = "Kero"
+        let named = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        content.title = named?.isEmpty == false ? named! : "Kero"
         content.body = message
         content.sound = isSoundEnabled ? .default : nil
         if let sessionID {

@@ -900,13 +900,18 @@ enum KeroAutomationCommandLine {
         )
     }
 
-    /// Claude Code's `Notification` hook covers two unrelated things: a tool
-    /// call waiting for approval, and a nag that the user has not typed
-    /// anything for a minute. Only the first is a blocker.
+    /// Which of Claude Code's `Notification` events is a real blocker.
     ///
-    /// Without this, an agent the user had already looked at re-announced
-    /// itself every time they glanced away — the nag fires on a timer, so
-    /// acknowledging it just started the clock again.
+    /// That one hook covers two unrelated things: a tool call waiting for
+    /// approval, and a nag that the user has not typed for a minute. Only the
+    /// first is a blocker. Without the distinction, an agent the user had
+    /// already looked at re-announced itself every time they glanced away —
+    /// the nag runs on a timer, so acknowledging it just restarted the clock —
+    /// and a turn that had simply finished arrived as "needs attention".
+    ///
+    /// Cue matching follows cmux's classifier: tokens rather than substrings,
+    /// so "waiting" is recognized wherever the provider puts it and a word
+    /// like "permissions" in a task summary cannot masquerade as a prompt.
     private static func isIdleReminder(
         _ phase: KeroAgentPhase,
         event: [String: KeroJSONValue]?
@@ -914,10 +919,27 @@ enum KeroAutomationCommandLine {
         guard phase == .blocked,
               let message = event?["message"]?.stringValue?.lowercased()
         else { return false }
-        // Match the waiting-for-input wording only. An unrecognized message is
-        // still reported: missing a real approval prompt is the worse failure.
-        return message.contains("waiting for your input")
-            || message.contains("waiting for input")
+        let tokens = message.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        // An approval request wins outright: mistaking one for a nag would
+        // silently strand the agent, which is far worse than one extra alert.
+        if tokens.contains(where: {
+            $0.hasPrefix("permission") || $0.hasPrefix("approv")
+                || $0 == "confirm" || $0 == "allow"
+        }) {
+            return false
+        }
+        for (index, token) in tokens.enumerated() {
+            let previous = index > 0 ? tokens[index - 1] : nil
+            if token == "idle" || token == "wait" || token == "waiting"
+                || token == "awaiting" {
+                return true
+            }
+            if token == "input",
+               previous == "your" || previous == "user" || previous == "for" {
+                return true
+            }
+        }
+        return false
     }
 
     private static func readIntegrationEvent() -> [String: KeroJSONValue]? {

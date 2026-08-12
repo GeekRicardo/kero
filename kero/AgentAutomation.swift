@@ -383,6 +383,17 @@ final class KeroAgentObservationState {
     /// a turn. Track active-turn evidence so launching an already-idle CLI in
     /// the background never looks like a newly finished task.
     var integrationTurnActive = false
+    /// Set once this agent has reported a lifecycle event of its own. The
+    /// screen classifier may still refine a live turn to working or blocked,
+    /// but it must not decide that a turn *ended*: a settled screen only means
+    /// the UI stopped moving, which is equally true of a CLI that has just
+    /// started and been asked nothing.
+    var hasNativeLifecycle = false
+    /// Set once this agent has reported the *start* of a turn. Until then a
+    /// screen that looked busy is the only evidence a turn ever happened, and
+    /// is worth trusting; afterwards the provider is the only thing that
+    /// decides what a turn is.
+    var hasReportedTurnStart = false
     var screenPromptedAt: Date?
     var lastScreenFingerprint: Int?
     var screenChangeCount = 0
@@ -694,8 +705,10 @@ extension TerminalSession {
         agentObservation.integrationPhase = phase
         agentObservation.integrationReason = reason
         agentObservation.commandGraceDeadline = nil
+        agentObservation.hasNativeLifecycle = true
         if phase == .working || phase == .blocked {
             agentObservation.integrationTurnActive = true
+            agentObservation.hasReportedTurnStart = true
             // An agent that reports work is demonstrably past the state where
             // it was merely created and waiting: clear the gate, or a pane
             // Kero launched or resumed would stay `created` forever and its
@@ -728,9 +741,15 @@ extension TerminalSession {
             return true
         }
 
+        // Once the provider reports turn starts, only a reported turn counts.
+        // A freshly launched CLI paints a busy-looking first screen, and
+        // reading that as a turn is what made merely starting a conversation
+        // and looking away announce that something had finished. A provider
+        // that only ever reports idle keeps the old screen-based evidence.
         let completedTurn = agentObservation.integrationTurnActive
-            || agentStatus?.phase == .working
-            || agentStatus?.phase == .blocked
+            || (!agentObservation.hasReportedTurnStart
+                && (agentStatus?.phase == .working
+                    || agentStatus?.phase == .blocked))
         let presentedPhase: KeroAgentPhase
         switch phase {
         case .idle, .done:
@@ -971,13 +990,13 @@ extension TerminalSession {
                 || agentStatus?.authority == .integration)
         if screenCanClassify {
             if let inferred = automationScreenFallback(kind: kind, isFocused: isFocused) {
-                if agentObservation.integrationPhase == .working,
+                if agentObservation.hasNativeLifecycle,
                    inferred.phase == .idle || inferred.phase == .done {
-                    // A freshly submitted full-screen agent can briefly paint
-                    // an idle-looking frame before its first response. Native
-                    // lifecycle owns completion once it has reported working;
-                    // the screen may refine that state to working/blocked but
-                    // must never manufacture an early completion.
+                    // Native lifecycle owns completion for an agent that
+                    // reports it. The screen may still refine a live turn to
+                    // working or blocked, but a settled screen means only that
+                    // the UI stopped moving — which is also true of a CLI that
+                    // has just started and been asked nothing.
                     return
                 }
                 updateAutomationAgentStatus(
@@ -1044,6 +1063,8 @@ extension TerminalSession {
         agentObservation.integrationPhase = nil
         agentObservation.integrationReason = nil
         agentObservation.integrationTurnActive = false
+        agentObservation.hasNativeLifecycle = false
+        agentObservation.hasReportedTurnStart = false
         agentObservation.awaitingInitialPrompt = false
         agentObservation.commandGraceDeadline = nil
         agentObservation.resetScreenObservation()
@@ -1095,10 +1116,14 @@ extension TerminalSession {
             guard !agentObservation.didNotifyAttention else { return }
             agentObservation.didNotifyAttention = true
         }
+        // The agent's own title is how the user tells one pane from another —
+        // it names the task, where the alias only names the worker.
+        let heading = title.trimmingCharacters(in: .whitespacesAndNewlines)
         TerminalNotificationService.shared.post(
             message: phase == .blocked
                 ? String(localized: "\(alias) needs attention")
                 : String(localized: "\(alias) finished"),
+            title: heading.isEmpty ? nil : heading,
             sessionID: id
         )
     }
