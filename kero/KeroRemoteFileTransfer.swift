@@ -169,11 +169,6 @@ struct KeroSSHSession: Equatable {
         return "\(loginName)@\(destination)"
     }
 
-    /// True when the existing connection is multiplexed, so an upload rides it
-    /// instead of authenticating again.
-    var reusesConnection: Bool {
-        controlPath != nil
-    }
 }
 
 /// One in-flight upload. Held by the pane so the user can cancel it.
