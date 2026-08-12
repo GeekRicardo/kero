@@ -105,6 +105,9 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     private let metalDevice = AlacrittyTerminalView.sharedDevice
     private var renderScheduled = false
     private var renderRetryScheduled = false
+    /// Guards `retryRenderSoon` against spinning behind a surface that never
+    /// manages a frame. Reset whenever one reaches the GPU.
+    private var consecutiveRenderRetries = 0
     /// Recovery timer for a pane still hidden behind its presentation cover.
     private var coverWatchdog: Timer?
     private var coverWatchdogAttempts = 0
@@ -567,25 +570,29 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         }
     }
 
-    /// Re-attempts a frame this view still owes.
+    /// Re-attempts a frame that was dropped before anything was drawn.
     ///
-    /// Only when one is actually owed: a pane hidden behind its presentation
-    /// cover, or a pending host-side change the emulator never reported as
-    /// damage. An ordinary skipped frame is left alone — the next wakeup
-    /// covers it, and retrying those would turn every idle terminal into a
-    /// timer.
-    private func retryRenderIfOwed() {
-        guard isSurfaceVisible,
-              isAwaitingVisibleFrame || needsUnconditionalRedraw,
-              !renderRetryScheduled
+    /// Only for the paths that bail after this view was already asked to draw:
+    /// there is no guarantee of another wakeup to recover on, so without this
+    /// the pane keeps showing whatever was on screen before — for a program
+    /// that just cleared to its alternate screen, nothing at all.
+    ///
+    /// Bounded so a surface that can never draw does not spin. The count
+    /// resets as soon as a frame reaches the GPU.
+    private func retryRenderSoon() {
+        guard isSurfaceVisible, !renderRetryScheduled,
+              consecutiveRenderRetries < 120
         else { return }
         renderRetryScheduled = true
+        consecutiveRenderRetries += 1
         // Roughly a frame later: long enough for a synchronized update to
         // close or a drawable to come back, short enough to be invisible.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
-            guard let self else { return }
-            self.renderRetryScheduled = false
-            self.scheduleRender(force: true)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.renderRetryScheduled = false
+                self.scheduleRender(force: true)
+            }
         }
     }
 
@@ -607,14 +614,13 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         // Full-screen TUIs use DEC mode 2026 to replace a frame atomically.
         // A host cursor tick must not expose the cleared intermediate grid.
         if !waitUntilCompleted, kero_alacritty_synchronized_update(handle) {
-            // Retry rather than simply drop the frame. Rendering is driven by
-            // PTY wakeups, and a program that has just finished painting its
-            // first screen goes quiet — so a frame skipped here is not
-            // followed by another until something else arrives. With a
-            // presentation cover up, that leaves the pane blank over a screen
-            // that is already complete, until a keystroke happens to produce
-            // more output.
-            retryRenderIfOwed()
+            // Always retry, whether or not this view already owed a frame.
+            // Rendering is driven by PTY wakeups, and a program that has just
+            // painted an atomic frame goes quiet — so nothing else is coming
+            // to try again with. The bridge lifts suppression when its
+            // deadline passes, which is now reachable precisely because this
+            // keeps asking.
+            retryRenderSoon()
             return true
         }
         revalidateURLHoverForRender()
@@ -659,8 +665,9 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         )
         guard let drawable = metalLayer.nextDrawable() else {
             // The pool is momentarily empty. Same reasoning as the
-            // synchronized-update skip: nothing else guarantees another try.
-            retryRenderIfOwed()
+            // synchronized-update skip: nothing else guarantees another try,
+            // and the damage for this frame has already been consumed.
+            retryRenderSoon()
             return false
         }
         // Keep the IOSurface before render schedules this drawable for
@@ -702,6 +709,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         } else {
             onPresented = nil
         }
+        consecutiveRenderRetries = 0
         let submitted = renderer.render(
             snapshot: snapshot,
             kittyPlacements: kittyPlacements,

@@ -1989,6 +1989,21 @@ pub unsafe extern "C" fn kero_alacritty_clear(handle: *mut KeroTerminal) {
 
 /// Whether Alacritty is buffering a DEC synchronized update.
 ///
+/// Expires the timeout before answering.
+///
+/// Suppression was only ever re-evaluated on the next wakeup. That is the
+/// right moment to honor `synchronized_update_ending` — the reader sees ESU
+/// before Alacritty has parsed it, and the wakeup is what confirms the
+/// buffered frame was committed — but it left the deadline unreachable, since
+/// a program that has finished painting an atomic frame has nothing more to
+/// say and no further wakeup arrives. Suppression then stayed on forever, the
+/// host skipped every frame waiting for it to lift, and the pane sat blank
+/// over a screen that was already complete until a keystroke produced output.
+///
+/// Asking is the other moment the deadline can pass, so it is checked here.
+/// The `ending` handshake deliberately still waits for its wakeup: clearing on
+/// it here would let the host draw a frame Alacritty has not committed yet.
+///
 /// # Safety
 /// `handle` must be live.
 #[no_mangle]
@@ -1996,7 +2011,16 @@ pub unsafe extern "C" fn kero_alacritty_synchronized_update(handle: *mut KeroTer
     if handle.is_null() {
         return false;
     }
-    (*handle).shared.lock().synchronized_update
+    let mut shared = (*handle).shared.lock();
+    let timed_out = shared
+        .synchronized_update_deadline
+        .is_some_and(|deadline| deadline <= Instant::now());
+    if shared.synchronized_update && timed_out {
+        shared.synchronized_update = false;
+        shared.synchronized_update_ending = false;
+        shared.synchronized_update_deadline = None;
+    }
+    shared.synchronized_update
 }
 
 #[cfg(test)]
