@@ -41,7 +41,20 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     /// The cover lives above the drawable so the GPU can acquire and present
     /// the first correctly-sized frame before the terminal becomes visible.
     private let presentationCoverLayer = CALayer()
-    private var isAwaitingVisibleFrame = true
+    /// True while the user is looking at the presentation cover rather than
+    /// at terminal content. Owning the recovery timer here rather than at the
+    /// call sites is deliberate: every path that raises the cover, including
+    /// ones that bypass `setPresentationCoverVisible`, gets the watchdog.
+    private var isAwaitingVisibleFrame = true {
+        didSet {
+            guard isAwaitingVisibleFrame != oldValue else { return }
+            if isAwaitingVisibleFrame, isSurfaceVisible {
+                startCoverWatchdog()
+            } else if !isAwaitingVisibleFrame {
+                stopCoverWatchdog()
+            }
+        }
+    }
     private var presentationGeneration: UInt64 = 0
     private var lastPresentedSize: CGSize?
     private var lastPresentedScale: CGFloat?
@@ -380,6 +393,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         }
         isSurfaceVisible = visible
         presentationGeneration &+= 1
+        if visible, isAwaitingVisibleFrame { startCoverWatchdog() }
         if visible {
             updateBackingLayerActivity(forceFrame: true)
             updateActiveTimers()
@@ -805,7 +819,6 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         CATransaction.setDisableActions(true)
         presentationCoverLayer.isHidden = !visible
         CATransaction.commit()
-        if visible { startCoverWatchdog() } else { stopCoverWatchdog() }
     }
 
     /// Keeps asking for a frame for as long as the presentation cover is up.
@@ -828,11 +841,11 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         guard coverWatchdog == nil else { return }
         coverWatchdogAttempts = 0
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] timer in
-            guard let self else {
-                timer.invalidate()
-                return
-            }
-            assumeMainActor {
+            MainActor.assumeIsolated {
+                guard let self else {
+                    timer.invalidate()
+                    return
+                }
                 self.coverWatchdogAttempts += 1
                 guard self.isSurfaceVisible,
                       self.isAwaitingVisibleFrame,
