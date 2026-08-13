@@ -1164,7 +1164,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     func sendApplicationScroll(lines: Int) -> Bool {
         guard lines != 0 else { return false }
         let mode = terminalMode
-        if mode.contains(.mouseReporting) {
+        if mode.contains(.mouseReporting), mouseReportingHasOwner {
             let code = lines > 0 ? 64 : 65
             let column = max(gridSize.columns / 2, 0)
             let row = max(gridSize.rows / 2, 0)
@@ -1356,6 +1356,28 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     private var terminalMode: AlacrittyTerminalMode {
         guard let handle else { return [] }
         return AlacrittyTerminalMode(rawValue: kero_alacritty_mode(handle))
+    }
+
+    /// Whether mouse reports still belong to a program that is running.
+    ///
+    /// Mouse reporting is turned on by a full-screen program and turned off by
+    /// that same program on its way out. A connection that drops takes the
+    /// program with it before it can do the second half — `ssh` dies, the
+    /// remote `vim` or `tmux` never sends the disable sequence, and this
+    /// terminal keeps reporting. The shell that inherits the terminal has no
+    /// idea what those bytes are, so every twitch of the pointer spills escape
+    /// sequences across the prompt.
+    ///
+    /// The shell being the foreground job again is exactly the moment those
+    /// reports stopped having an owner. A shell never asks for mouse
+    /// reporting, so declining to send them there costs nothing: the next
+    /// program to want them sets the mode itself.
+    private var mouseReportingHasOwner: Bool {
+        guard let handle else { return false }
+        let foreground = kero_alacritty_foreground_pid(handle)
+        let shell = kero_alacritty_child_pid(handle)
+        guard foreground > 0, shell > 0 else { return true }
+        return foreground != shell
     }
 
     override var acceptsFirstResponder: Bool { true }
@@ -1694,7 +1716,9 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         scrollAccumulator -= CGFloat(lines)
 
         let mode = terminalMode
-        if mode.contains(.mouseReporting) {
+        // Falls through to host scrollback when the reports have no owner:
+        // a stale mode should not also cost the user their scroll wheel.
+        if mode.contains(.mouseReporting), mouseReportingHasOwner {
             let code = lines > 0 ? 64 : 65
             for _ in 0..<min(abs(lines), 50) {
                 sendMouse(code: code, event: event, released: false)
@@ -1739,11 +1763,12 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     private func shouldReportMouse(_ event: NSEvent) -> Bool {
         terminalMode.contains(.mouseReporting)
             && !event.modifierFlags.contains(.shift)
+            && mouseReportingHasOwner
     }
 
     private func sendMouse(code: Int, event: NSEvent, released: Bool) {
         let mode = terminalMode
-        guard mode.contains(.mouseReporting) else { return }
+        guard mode.contains(.mouseReporting), mouseReportingHasOwner else { return }
         let point = gridPoint(for: event)
         let modifiers =
             (event.modifierFlags.contains(.shift) ? 4 : 0)
