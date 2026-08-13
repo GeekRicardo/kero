@@ -1235,14 +1235,10 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
 
     func findSelection() {
         guard let handle, kero_alacritty_has_selection(handle) else { return }
-        let needed = kero_alacritty_selection_text(handle, nil, 0)
-        guard needed > 0 else { return }
-        var buffer = [UInt8](repeating: 0, count: needed)
-        let written = buffer.withUnsafeMutableBufferPointer { pointer in
-            kero_alacritty_selection_text(handle, pointer.baseAddress, needed)
-        }
-        guard written > 0 else { return }
-        let needle = String(decoding: buffer[..<written], as: UTF8.self)
+        guard let buffer = Self.bridgeBytes({ pointer, capacity in
+            kero_alacritty_selection_text(handle, pointer, capacity)
+        }) else { return }
+        let needle = String(decoding: buffer, as: UTF8.self)
         events?.terminalDidBeginFind(needle: needle)
         beginFind(needle)
     }
@@ -1304,19 +1300,47 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         return lines.joined(separator: "\n")
     }
 
+    /// Collects bytes from a bridge call that answers a null buffer with the
+    /// size it needs.
+    ///
+    /// That convention costs two calls, and the terminal is not frozen between
+    /// them: the PTY thread appends output on its own, so the second call can
+    /// need more room than the first one measured. When it does, the bridge
+    /// copies nothing and returns the new size — a value larger than the
+    /// buffer that was just allocated. Treating that return as "bytes written"
+    /// reads past the end of the array, which is how sampling a busy pane
+    /// could take the app down.
+    private static func bridgeBytes(
+        _ read: (UnsafeMutablePointer<UInt8>?, Int) -> Int
+    ) -> [UInt8]? {
+        var capacity = read(nil, 0)
+        // Bounded, because output that keeps arriving would keep invalidating
+        // the measurement. Each retry over-allocates so the next attempt has
+        // room for another burst rather than losing the same race again.
+        for _ in 0..<4 {
+            guard capacity > 0 else { return nil }
+            var buffer = [UInt8](repeating: 0, count: capacity)
+            let written = buffer.withUnsafeMutableBufferPointer {
+                read($0.baseAddress, $0.count)
+            }
+            guard written > 0 else { return nil }
+            if written <= capacity {
+                buffer.removeLast(capacity - written)
+                return buffer
+            }
+            capacity = written + written / 8 + 4_096
+        }
+        return nil
+    }
+
     /// Writes the bridge's styled VT stream to its own directory under the
     /// temporary directory, which is the contract `TerminalHistorySerializer`
     /// validates before it reads.
     private func exportFile(scrollbackOnly: Bool) -> String? {
         guard let handle else { return nil }
-        let needed = kero_alacritty_buffer_text(handle, scrollbackOnly, nil, 0)
-        guard needed > 0 else { return nil }
-
-        var buffer = [UInt8](repeating: 0, count: needed)
-        let written = buffer.withUnsafeMutableBufferPointer { pointer in
-            kero_alacritty_buffer_text(handle, scrollbackOnly, pointer.baseAddress, needed)
-        }
-        guard written > 0 else { return nil }
+        guard let buffer = Self.bridgeBytes({ pointer, capacity in
+            kero_alacritty_buffer_text(handle, scrollbackOnly, pointer, capacity)
+        }) else { return nil }
 
         let manager = FileManager.default
         let directory = manager.temporaryDirectory
@@ -1327,7 +1351,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
                 attributes: [.posixPermissions: 0o700]
             )
             let file = directory.appendingPathComponent("screen.vt")
-            try Data(buffer[..<written]).write(to: file, options: .atomic)
+            try Data(buffer).write(to: file, options: .atomic)
             try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
             return file.path
         } catch {
@@ -1839,16 +1863,12 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
 
     @objc func copy(_ sender: Any?) {
         guard let handle else { return }
-        let needed = kero_alacritty_selection_text(handle, nil, 0)
-        guard needed > 0 else { return }
-        var buffer = [UInt8](repeating: 0, count: needed)
-        let written = buffer.withUnsafeMutableBufferPointer { pointer in
-            kero_alacritty_selection_text(handle, pointer.baseAddress, needed)
-        }
-        guard written > 0 else { return }
+        guard let buffer = Self.bridgeBytes({ pointer, capacity in
+            kero_alacritty_selection_text(handle, pointer, capacity)
+        }) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(
-            String(decoding: buffer[..<written], as: UTF8.self), forType: .string
+            String(decoding: buffer, as: UTF8.self), forType: .string
         )
     }
 
