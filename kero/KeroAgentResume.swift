@@ -144,6 +144,13 @@ extension TerminalSession {
         let observed = surface.foregroundPid.flatMap { pid -> pid_t? in
             KeroAgentKind.recognize(processID: pid) == kind ? pid : nil
         }
+        // Reporting a conversation id is itself proof that this agent reports
+        // its own lifecycle, and it arrives at startup — before the first
+        // prompt, and so before any turn event. Without this, the window
+        // between launching an agent and asking it something was still open
+        // for the screen classifier to decide a turn had finished there.
+        agentObservation.hasNativeLifecycle = true
+
         var resolved: String?
         if let directory, KeroAgentResume.isSafeDirectory(directory) {
             resolved = directory

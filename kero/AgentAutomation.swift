@@ -755,6 +755,13 @@ extension TerminalSession {
         case .idle, .done:
             presentedPhase = completedTurn && !focused ? .done : .idle
             agentObservation.integrationTurnActive = false
+            // Only a turn that actually started can finish. Without this, a
+            // conversation that had merely been opened announced itself the
+            // moment the user looked away.
+            if completedTurn { notifyAgentEvent(phase: .done, alias: alias) }
+        case .blocked:
+            presentedPhase = phase
+            notifyAgentEvent(phase: .blocked, alias: alias)
         default:
             presentedPhase = phase
         }
@@ -1056,6 +1063,42 @@ extension TerminalSession {
         )
     }
 
+    /// Raises the notification for one lifecycle event.
+    ///
+    /// Deliberately not derived from the status the UI is showing: an event is
+    /// a fact reported by the agent, while the status is a reconciliation of
+    /// that fact with screen observation and focus. Tying the notification to
+    /// the status is what let a settled-looking screen announce a completion
+    /// nobody had asked for.
+    ///
+    /// At most one completion and one attention per turn. A provider can
+    /// report the end of the same turn more than once — a nested stop, a
+    /// re-delivered event — and an agent the user has already looked at must
+    /// not re-announce itself.
+    private func notifyAgentEvent(phase: KeroAgentPhase, alias: String) {
+        guard !TerminalManager.automationIsSessionFocused(id) else { return }
+        switch phase {
+        case .done, .idle:
+            guard !agentObservation.didNotifyCompletion else { return }
+            agentObservation.didNotifyCompletion = true
+        case .blocked:
+            guard !agentObservation.didNotifyAttention else { return }
+            agentObservation.didNotifyAttention = true
+        default:
+            return
+        }
+        // The agent's own title is how the user tells one pane from another —
+        // it names the task, where the alias only names the worker.
+        let heading = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        TerminalNotificationService.shared.post(
+            message: phase == .blocked
+                ? String(localized: "\(alias) needs attention")
+                : String(localized: "\(alias) finished"),
+            title: heading.isEmpty ? nil : heading,
+            sessionID: id
+        )
+    }
+
     private func clearAutomationAgentStatus() {
         agentStatus = nil
         agentObservation.alias = nil
@@ -1102,30 +1145,15 @@ extension TerminalSession {
             unseen: unseen
         )
 
-        guard phase != previousPhase,
-              phase == .blocked || phase == .done,
-              !TerminalManager.automationIsSessionFocused(id)
+        // An agent that reports its own lifecycle is notified about from the
+        // event itself — see `notifyAgentEvent`. Only agents Kero has to watch
+        // from the outside raise notifications from a state change, because
+        // for them a state change is the only evidence there is.
+        guard !agentObservation.hasNativeLifecycle,
+              phase != previousPhase,
+              phase == .blocked || phase == .done
         else { return }
-        // At most one of each per turn. Without this, anything that re-enters
-        // the same state — a provider's idle reminder, a second stop event,
-        // focus moving away again — reads as a fresh completion.
-        if phase == .done {
-            guard !agentObservation.didNotifyCompletion else { return }
-            agentObservation.didNotifyCompletion = true
-        } else {
-            guard !agentObservation.didNotifyAttention else { return }
-            agentObservation.didNotifyAttention = true
-        }
-        // The agent's own title is how the user tells one pane from another —
-        // it names the task, where the alias only names the worker.
-        let heading = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        TerminalNotificationService.shared.post(
-            message: phase == .blocked
-                ? String(localized: "\(alias) needs attention")
-                : String(localized: "\(alias) finished"),
-            title: heading.isEmpty ? nil : heading,
-            sessionID: id
-        )
+        notifyAgentEvent(phase: phase, alias: alias)
     }
 }
 
