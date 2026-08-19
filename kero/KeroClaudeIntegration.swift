@@ -15,9 +15,9 @@ import Foundation
 /// Kero's marker, and refuses to write at all if it cannot first parse what is
 /// already there.
 ///
-/// What the hooks buy: authoritative turn boundaries for Claude Code (rather
-/// than Kero's debounced screen classifier), and the conversation id that makes
-/// resuming a pane after a relaunch possible at all.
+/// What the hooks buy: authoritative turn boundaries for Claude Code, which
+/// Kero has no other way to know, and the conversation id that makes resuming
+/// a pane after a relaunch possible at all.
 enum KeroClaudeIntegration {
     static let marker = "KERO_INTEGRATION_ID=claude"
 

@@ -146,9 +146,9 @@ extension TerminalSession {
         }
         // Reporting a conversation id is itself proof that this agent reports
         // its own lifecycle, and it arrives at startup — before the first
-        // prompt, and so before any turn event. Without this, the window
-        // between launching an agent and asking it something was still open
-        // for the screen classifier to decide a turn had finished there.
+        // prompt, and so before any turn event. Recording it here means the
+        // window between launching an agent and asking it something is already
+        // covered when the first real event lands.
         agentObservation.hasNativeLifecycle = true
 
         var resolved: String?

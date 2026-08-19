@@ -25,6 +25,17 @@ the original feature bullet instead of adding separate entries for them.
 - Drive Kero terminals from an agent with `kero +term`: create and close panes, send text and control keys, read new output or scrollback by line number, wait for silence or a pattern instead of sleeping, and run a command for its own exit code without ever blocking indefinitely
 - Prevent a rare crash while refreshing the Git panel in a repository that holds two file names differing only in their Unicode spelling
 
+## [0.1.47]
+
+- Let dictation and other accessibility tools enter text in terminal panes
+- Choose a block, bar, or underline terminal cursor, with or without blinking
+- Respect the selected System, Light, or Dark appearance when Kero launches
+- Stop inferring coding-agent progress from terminal text, preventing false Working, Blocked, and Done states from ordinary terminal output
+
+## [0.1.46]
+
+- Fix new terminal panes failing to start a shell after hours of coding-agent use: the Ghostty backend's screen exports leaked two file descriptors each, exhausting the process descriptor table
+
 ## [0.1.45]
 
 - Automate project-scoped panes and coding agents from Kero terminals with guarded `+pane` and `+agent` commands, one-click AI setup, semantic status badges, completion notifications, and attention navigation
