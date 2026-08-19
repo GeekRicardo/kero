@@ -132,6 +132,16 @@ When true, Option-key combinations are sent to terminal programs as Alt/Meta
 shortcuts. The default leaves Option with the active macOS input source so
 layouts such as Polish Pro can type their composed characters.
 
+### `terminal.paste-protection`
+
+boolean — default `true`
+
+Confirms a paste whose text contains line breaks before it reaches the
+terminal. A shell submits every line but the last as soon as it arrives, so the
+confirmation is the only chance to read a copied snippet before it runs. Turn
+it off when pasting multi-line text is routine work; single-line pastes are
+never held either way.
+
 ### `terminal.restore-history`
 
 boolean — default `false`
@@ -170,6 +180,7 @@ sidebar.font-size = 13
 toolbar.visibility = "auto"
 terminal.font-thicken = true
 terminal.macos-option-as-alt = false
+terminal.paste-protection = true
 terminal.backend = "alacritty"
 terminal.restore-history = true
 editor.wrap-lines = true

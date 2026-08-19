@@ -205,6 +205,17 @@ struct SettingsView: View {
                 }
 
                 DescribedSettingsRow(
+                    "Confirm multi-line pastes",
+                    description: "Asks first when pasted text contains line breaks, which a shell runs as commands"
+                ) {
+                    Toggle(
+                        "Confirm multi-line pastes",
+                        isOn: $settings.pasteProtection
+                    )
+                    .labelsHidden()
+                }
+
+                DescribedSettingsRow(
                     "Restore session history on relaunch",
                     description: "Reopened terminals show their previous scrollback above a fresh shell"
                 ) {
@@ -280,6 +291,7 @@ struct SettingsView: View {
                         && !settings.aiEnabled
                         && settings.notificationSound
                         && settings.copyOnSelect
+                        && settings.pasteProtection
                         && !settings.shortcuts.hasCustomBindings
                         && settings.terminalBackend == .fallback)
                 }

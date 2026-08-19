@@ -221,6 +221,17 @@ final class AppSettings: nonisolated ObservableObject {
         }
     }
 
+    /// Hold a paste that carries line breaks behind a confirmation, because a
+    /// shell runs every line but the last the moment it arrives. On by
+    /// default; turn it off when pasting whole snippets into a shell or an
+    /// agent prompt is routine and the interruption is the surprise.
+    @Published var pasteProtection: Bool {
+        didSet {
+            TerminalManager.refreshAllAppearances()
+            save()
+        }
+    }
+
     /// Play a sound with Kero's notifications — an agent finishing or needing
     /// attention, a terminal bell, a program's own notification request. On by
     /// default: the point of a background notification is to be noticed, and
@@ -285,6 +296,7 @@ final class AppSettings: nonisolated ObservableObject {
         aiEnabled = toml["ai.enabled"]?.bool ?? false
         notificationSound = toml["notifications.sound"]?.bool ?? true
         copyOnSelect = toml["terminal.copy-on-select"]?.bool ?? true
+        pasteProtection = toml["terminal.paste-protection"]?.bool ?? true
         shortcuts = KeyboardShortcutMap.load(from: toml)
         terminalBackend = TerminalBackend(persisted: toml["terminal.backend"]?.string)
         applyAppearance()
@@ -336,6 +348,7 @@ final class AppSettings: nonisolated ObservableObject {
         restoreTerminalHistory = false
         notificationSound = true
         copyOnSelect = true
+        pasteProtection = true
         shortcuts.resetAll()
         if aiEnabled {
             do {
@@ -432,6 +445,9 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if !copyOnSelect {
             lines.append("terminal.copy-on-select = false")
+        }
+        if !pasteProtection {
+            lines.append("terminal.paste-protection = false")
         }
         if terminalBackend != .fallback {
             lines.append("terminal.backend = \(TOML.quote(terminalBackend.rawValue))")
