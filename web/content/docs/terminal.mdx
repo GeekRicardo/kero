@@ -95,7 +95,9 @@ program reports progress, the pane shows it.
 - **Clipboard reads are confirmed.** `OSC 52` can ask for the macOS clipboard,
   including from a remote host over SSH. Kero asks before returning it.
 - **Risky pastes are flagged.** Multi-line or command-like text is held behind
-  a confirmation instead of being submitted immediately.
+  a confirmation instead of being submitted immediately. Turn **Confirm
+  multi-line pastes** off in Settings when that is your normal way of working;
+  see [`terminal.paste-protection`](/docs/configuration#terminalpaste-protection).
 - **Files become shell-safe paths.** Finder-copied or dragged files are inserted
   as quoted absolute paths. Clipboard images still reach image-aware TUIs.
 

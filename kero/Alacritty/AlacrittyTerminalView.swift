@@ -1889,7 +1889,10 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             write([0x16])
             return
         }
-        let submitRisk = text.contains("\n") || text.contains("\r")
+        // Every line but the last is submitted the instant it arrives, so a
+        // multi-line paste is the one a shell acts on before it can be read.
+        let submitRisk = AppSettings.shared.pasteProtection
+            && (text.contains("\n") || text.contains("\r"))
         guard submitRisk else {
             write(AlacrittyKeyMap.paste(text, mode: terminalMode))
             return

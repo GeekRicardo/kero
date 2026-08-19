@@ -102,6 +102,14 @@ Powerline 分隔符和图标字形也能正常显示。
 
 打开后，Option 组合键会作为 Alt/Meta 快捷键发送给终端程序。默认关闭，让 Option 继续交给当前 macOS 输入源，因此 Polish Pro 之类的键盘布局仍能输入组合字符。
 
+### `terminal.paste-protection`
+
+boolean — 默认 `true`
+
+含换行的文本粘贴进终端前先确认。shell 会在每一行到达的瞬间提交它（最后一行除外），
+所以这个确认是你在复制来的片段执行之前读它的唯一机会。如果多行粘贴本来就是日常操作，
+可以关掉；单行粘贴无论如何都不会被拦。
+
 ### `terminal.restore-history`
 
 布尔值——默认 `false`
@@ -132,6 +140,7 @@ sidebar.font-size = 13
 toolbar.visibility = "auto"
 terminal.font-thicken = true
 terminal.macos-option-as-alt = false
+terminal.paste-protection = true
 terminal.backend = "alacritty"
 terminal.restore-history = true
 editor.wrap-lines = true
