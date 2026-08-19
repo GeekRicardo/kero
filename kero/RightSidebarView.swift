@@ -1626,9 +1626,15 @@ private struct GitPanel: View {
         }
         return PendingDiscard(
             entry: entry,
-            fingerprints: Dictionary(uniqueKeysWithValues: paths.map { path in
-                (path, fileFingerprint(at: absolutePath(path, for: entry)))
-            }),
+            // A rename that only changes a name's Unicode spelling leaves two
+            // paths Git tells apart but Swift does not. One fingerprint still
+            // guards the file; trapping on the duplicate would not.
+            fingerprints: Dictionary(
+                paths.map { path in
+                    (path, fileFingerprint(at: absolutePath(path, for: entry)))
+                },
+                uniquingKeysWith: { first, _ in first }
+            ),
             branch: model.branch,
             headOID: model.headOID
         )

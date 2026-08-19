@@ -22,6 +22,7 @@ the original feature bullet instead of adding separate entries for them.
 - Customize keyboard shortcuts in Settings: every window, workspace, tab, pane, and view command is rebindable, including which modifier the 1–9 keys use for workspaces and for tabs, with conflicts called out and one-click restore. Hold a shortcut's modifiers to reveal the matching key on each workspace and tab
 - Turn copy on select off in Settings; it stays on by default
 - Drive Kero terminals from an agent with `kero +term`: create and close panes, send text and control keys, read new output or scrollback by line number, wait for silence or a pattern instead of sleeping, and run a command for its own exit code without ever blocking indefinitely
+- Prevent a rare crash while refreshing the Git panel in a repository that holds two file names differing only in their Unicode spelling
 
 ## [0.1.45]
 

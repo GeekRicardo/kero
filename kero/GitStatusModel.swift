@@ -1080,8 +1080,16 @@ final class GitStatusModel: nonisolated ObservableObject {
             entry.repositoryRoot = result.topLevel
             return entry
         }
+        // Git reports paths as raw bytes, so one snapshot can hold two paths
+        // that Swift considers the same key: the composed and decomposed
+        // spellings of a name compare equal. Losing one decoration is a
+        // cosmetic detail; trapping on the duplicate would kill the app during
+        // an ordinary refresh, so keep whichever state needs attention most.
         fileDecorations = Dictionary(
-            uniqueKeysWithValues: entries.map { ($0.path, Self.fileDecoration(for: $0)) }
+            entries.map { ($0.path, Self.fileDecoration(for: $0)) },
+            uniquingKeysWith: {
+                $0.directoryPriority >= $1.directoryPriority ? $0 : $1
+            }
         )
         ignoredPaths = result.ignoredPaths
         mergeEntries = entries.filter(\.isConflict)
